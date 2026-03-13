@@ -1,0 +1,20 @@
+services:
+  memory-mcp:
+    image: memory-mcp:latest
+    build: 
+      context: ../..
+      dockerfile: docker/production/Dockerfile
+    container_name: memory-mcp
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      MCP_TRANSPORT: http
+      PORT: 3000
+      SURREAL_URL: wss://surreal.example.com
+      SURREAL_NS: test
+      SURREAL_DB: test
+      SURREAL_USER: root
+      SURREAL_PASS: awesomepassword
+    networks:
+      - default
