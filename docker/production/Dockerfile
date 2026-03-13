@@ -1,9 +1,7 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
-# npm ci limpio — sin residuos de versiones anteriores
+COPY package*.json tsconfig.json ./
 RUN npm ci
-COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
@@ -13,14 +11,22 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 
-# Solo deps de producción + limpiar caché de npm y binarios nativos no usados
-RUN npm ci --omit=dev && \
+# Instalar solo deps de producción y limpiar todo lo que no se necesita en runtime
+RUN npm ci --omit=dev --no-audit --no-fund && \
+    # Limpiar caché de npm (múltiples ubicaciones posibles)
     npm cache clean --force && \
-    # @surrealdb/node descarga binarios para múltiples plataformas — eliminar los que no son linux-x64
-    find /app/node_modules/@surrealdb -name '*.node' ! -name '*linux*x64*' -delete 2>/dev/null || true && \
+    rm -rf /root/.npm ~/.npm /tmp/npm-* && \
+    # Eliminar binarios nativos de otras plataformas (@surrealdb/node usa napi-rs)
+    find /app/node_modules -name '*.node' \
+      ! \( -name '*linux-x64*' -o -name '*linux_x64*' \) \
+      -delete 2>/dev/null || true && \
+    # Eliminar archivos innecesarios de node_modules
     find /app/node_modules -name '*.map' -delete 2>/dev/null || true && \
-    find /app/node_modules -type d -name '__tests__' -exec rm -rf {} + 2>/dev/null || true && \
-    find /app/node_modules -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true
+    find /app/node_modules -name '*.md' -delete 2>/dev/null || true && \
+    find /app/node_modules -name 'CHANGELOG*' -o -name 'LICENCE*' | xargs rm -f 2>/dev/null || true && \
+    find /app/node_modules -type d \
+      \( -name '__tests__' -o -name 'test' -o -name 'tests' -o -name 'coverage' -o -name 'docs' -o -name 'example' -o -name 'examples' \) \
+      -exec rm -rf {} + 2>/dev/null || true
 
 # Solo el JS compilado
 COPY --from=builder /app/dist ./dist

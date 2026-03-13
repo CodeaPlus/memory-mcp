@@ -29,7 +29,8 @@ jobs:
           context: .
           file: docker/production/Dockerfile
           push: true
+          platforms: linux/amd64
           tags: ${{ secrets.REGISTRY_URL }}/memory-mcp:latest
-          # Cache entre builds para acelerar el CI
-          cache-from: type=registry,ref=${{ secrets.REGISTRY_URL }}/memory-mcp:buildcache
-          cache-to: type=registry,ref=${{ secrets.REGISTRY_URL }}/memory-mcp:buildcache,mode=max
+          # Cache en GitHub Actions (no en el registry privado) para evitar layers grandes
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
