@@ -34,7 +34,8 @@ export async function createSession(
     summary: "",
     topics: [],
   });
-  return { session_id: (result as any).id?.toString() };
+  const record = Array.isArray(result) ? (result as any[])[0] : result;
+  return { session_id: (record as any).id?.toString() };
 }
 
 export async function endSession(
