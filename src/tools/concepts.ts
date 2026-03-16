@@ -42,8 +42,8 @@ export async function relateConcepts(input: z.infer<typeof relateConceptsSchema>
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
     `RETURN fn::relate_concepts(
-      type::thing($from_id),
-      type::thing($to_id),
+      type::record($from_id),
+      type::record($to_id),
       $strength,
       $description
     )`,
@@ -64,7 +64,7 @@ export async function searchConcepts(input: z.infer<typeof searchConceptsSchema>
 export async function getConceptGraph(input: z.infer<typeof getConceptGraphSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
-    `RETURN fn::get_concept_graph(type::thing($concept_id))`,
+    `RETURN fn::get_concept_graph(type::record($concept_id))`,
     input
   );
   return result;

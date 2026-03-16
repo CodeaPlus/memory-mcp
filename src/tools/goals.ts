@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Table } from "surrealdb";
+import { Table, StringRecordId } from "surrealdb";
 import { getDB } from "../db.js";
 
 export const getGoalsSchema = z.object({
@@ -29,8 +29,8 @@ export async function updateGoalProgress(
 ) {
   const db = await getDB();
 
-  // v2: update con .merge()
-  await db.update(input.goal_id as any).merge({ current: input.current });
+  // v3: update() requiere RecordId, no string
+  await db.update(new StringRecordId(input.goal_id)).merge({ current: input.current });
 
   if (input.note) {
     await db.query(
@@ -82,7 +82,7 @@ export async function createGoal(input: z.infer<typeof createGoalSchema>) {
 export async function addMilestone(input: z.infer<typeof addMilestoneSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
-    `RETURN fn::add_milestone(type::thing($goal_id), $title, $description, $order)`,
+    `RETURN fn::add_milestone(type::record($goal_id), $title, $description, $order)`,
     input
   );
   return { status: "created", record: result };
@@ -91,7 +91,7 @@ export async function addMilestone(input: z.infer<typeof addMilestoneSchema>) {
 export async function completeMilestone(input: z.infer<typeof completeMilestoneSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
-    `RETURN fn::complete_milestone(type::thing($milestone_id))`,
+    `RETURN fn::complete_milestone(type::record($milestone_id))`,
     input
   );
   return { status: "completed", record: result };
@@ -100,7 +100,7 @@ export async function completeMilestone(input: z.infer<typeof completeMilestoneS
 export async function updateGoalStatus(input: z.infer<typeof updateGoalStatusSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
-    `RETURN fn::update_goal_status(type::thing($goal_id), $status)`,
+    `RETURN fn::update_goal_status(type::record($goal_id), $status)`,
     input
   );
   return { status: "updated", record: result };

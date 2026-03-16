@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Table } from "surrealdb";
+import { Table, StringRecordId } from "surrealdb";
 import { getDB } from "../db.js";
 import { storeMemory } from "./memory.js";
 
@@ -43,8 +43,8 @@ export async function endSession(
 ) {
   const db = await getDB();
 
-  // v2: update() usa builder pattern con .merge()
-  await db.update(input.session_id as any)
+  // v3: update() requiere RecordId, no string
+  await db.update(new StringRecordId(input.session_id))
     .merge({
       summary: input.summary,
       topics: input.topics,
@@ -92,7 +92,7 @@ export const listSessionsSchema = z.object({
 export async function addMessage(input: z.infer<typeof addMessageSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
-    `RETURN fn::add_message(type::thing($session_id), $role, $content)`,
+    `RETURN fn::add_message(type::record($session_id), $role, $content)`,
     input
   );
   return { status: "added", record: result };
@@ -101,7 +101,7 @@ export async function addMessage(input: z.infer<typeof addMessageSchema>) {
 export async function getMessages(input: z.infer<typeof getMessagesSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown[]]>(
-    `RETURN fn::get_messages(type::thing($session_id), $limit)`,
+    `RETURN fn::get_messages(type::record($session_id), $limit)`,
     input
   );
   return result ?? [];

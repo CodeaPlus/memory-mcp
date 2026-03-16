@@ -32,7 +32,7 @@ export async function updateTheory(input: z.infer<typeof updateTheorySchema>) {
   if (input.tags)    fields.tags    = input.tags;
 
   await db.query(
-    `UPDATE type::thing($id) MERGE $fields`,
+    `UPDATE type::record($id) MERGE $fields`,
     { id: input.theory_id, fields }
   );
   return { status: "updated" };
@@ -64,7 +64,7 @@ export async function searchTheories(input: z.infer<typeof searchTheoriesSchema>
 export async function linkTheorySession(input: z.infer<typeof linkTheorySessionSchema>) {
   const db = await getDB();
   const [result] = await db.query<[unknown]>(
-    `RETURN fn::link_theory_session(type::thing($theory_id), type::thing($session_id))`,
+    `RETURN fn::link_theory_session(type::record($theory_id), type::record($session_id))`,
     input
   );
   return { status: "linked", edge: result };
