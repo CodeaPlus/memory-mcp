@@ -3,7 +3,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
 
 import { storeMemory, storeMemorySchema,
          retrieveMemories, retrieveMemoriesSchema } from "./tools/memory.js";
@@ -20,14 +19,10 @@ import { getDB } from "./db.js";
 function log(level: "INFO" | "WARN" | "ERROR", ctx: string, msg: string, extra?: unknown) {
   const ts = new Date().toISOString();
   const line = `[${ts}] [${level}] [${ctx}] ${msg}`;
-  if (extra !== undefined) {
-    console.error(line, extra);
-  } else {
-    console.error(line);
-  }
+  extra !== undefined ? console.error(line, extra) : console.error(line);
 }
 
-// ─── Tool wrapper con logs ─────────────────────────────────────────────────────
+// ─── Tool wrapper ──────────────────────────────────────────────────────────────
 function toolHandler<T>(name: string, fn: (input: T) => Promise<unknown>) {
   return async (input: T) => {
     log("INFO", name, "llamado", input);
@@ -37,7 +32,7 @@ function toolHandler<T>(name: string, fn: (input: T) => Promise<unknown>) {
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
-      log("ERROR", name, `ERROR: ${error.message}`, error.stack);
+      log("ERROR", name, error.message, error.stack);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ error: error.message }) }],
         isError: true,
@@ -50,169 +45,87 @@ function toolHandler<T>(name: string, fn: (input: T) => Promise<unknown>) {
 function createMCPServer(): McpServer {
   const server = new McpServer({ name: "memory-mcp", version: "1.0.0" });
 
-  server.tool("store_memory",
-    "Almacena una memoria persistente con embedding semántico",
-    storeMemorySchema.shape,
-    toolHandler("store_memory", (input) => storeMemory(input as any))
-  );
-  server.tool("retrieve_memories",
-    "Recupera memorias relevantes por similitud semántica",
-    retrieveMemoriesSchema.shape,
-    toolHandler("retrieve_memories", (input) => retrieveMemories(input as any))
-  );
-  server.tool("get_session_context",
-    "Recupera contexto completo relevante para iniciar una sesión",
-    getSessionContextSchema.shape,
-    toolHandler("get_session_context", (input) => getSessionContext(input as any))
-  );
-  server.tool("create_session",
-    "Crea una nueva sesión de conversación",
-    createSessionSchema.shape,
-    toolHandler("create_session", (input) => createSession(input as any))
-  );
-  server.tool("end_session",
-    "Cierra sesión y persiste memorias destiladas",
-    endSessionSchema.shape,
-    toolHandler("end_session", (input) => endSession(input as any))
-  );
-  server.tool("store_theory",
-    "Almacena una teoría o insight de investigación",
-    storeTheorySchema.shape,
-    toolHandler("store_theory", (input) => storeTheory(input as any))
-  );
-  server.tool("update_theory",
-    "Actualiza estado o contenido de una teoría existente",
-    updateTheorySchema.shape,
-    toolHandler("update_theory", (input) => updateTheory(input as any))
-  );
-  server.tool("get_goals",
-    "Obtiene objetivos y su progreso actual",
-    getGoalsSchema.shape,
-    toolHandler("get_goals", (input) => getGoals(input as any))
-  );
-  server.tool("update_goal_progress",
-    "Actualiza el progreso de un objetivo",
-    updateGoalProgressSchema.shape,
-    toolHandler("update_goal_progress", (input) => updateGoalProgress(input as any))
-  );
+  server.registerTool("store_memory",        { description: "Almacena una memoria persistente con embedding semántico",  inputSchema: storeMemorySchema.shape        }, toolHandler("store_memory",        (i) => storeMemory(i as any)));
+  server.registerTool("retrieve_memories",   { description: "Recupera memorias relevantes por similitud semántica",      inputSchema: retrieveMemoriesSchema.shape   }, toolHandler("retrieve_memories",   (i) => retrieveMemories(i as any)));
+  server.registerTool("get_session_context", { description: "Recupera contexto completo relevante para iniciar sesión",  inputSchema: getSessionContextSchema.shape  }, toolHandler("get_session_context", (i) => getSessionContext(i as any)));
+  server.registerTool("create_session",      { description: "Crea una nueva sesión de conversación",                     inputSchema: createSessionSchema.shape      }, toolHandler("create_session",      (i) => createSession(i as any)));
+  server.registerTool("end_session",         { description: "Cierra sesión y persiste memorias destiladas",              inputSchema: endSessionSchema.shape         }, toolHandler("end_session",         (i) => endSession(i as any)));
+  server.registerTool("store_theory",        { description: "Almacena una teoría o insight de investigación",            inputSchema: storeTheorySchema.shape        }, toolHandler("store_theory",        (i) => storeTheory(i as any)));
+  server.registerTool("update_theory",       { description: "Actualiza estado o contenido de una teoría existente",      inputSchema: updateTheorySchema.shape       }, toolHandler("update_theory",       (i) => updateTheory(i as any)));
+  server.registerTool("get_goals",           { description: "Obtiene objetivos y su progreso actual",                    inputSchema: getGoalsSchema.shape           }, toolHandler("get_goals",           (i) => getGoals(i as any)));
+  server.registerTool("update_goal_progress",{ description: "Actualiza el progreso de un objetivo",                     inputSchema: updateGoalProgressSchema.shape }, toolHandler("update_goal_progress",(i) => updateGoalProgress(i as any)));
 
   return server;
 }
 
-// ─── Modo HTTP — StreamableHTTP ───────────────────────────────────────────────
+// ─── Modo HTTP ────────────────────────────────────────────────────────────────
 async function startHTTP() {
   const PORT = parseInt(process.env.PORT ?? "3000");
 
-  // Probe de DB al arranque para detectar problemas de conexión temprano
   log("INFO", "startup", "Verificando conexión a SurrealDB...");
   try {
     await getDB();
     log("INFO", "startup", "SurrealDB conectado OK");
   } catch (err) {
-    log("ERROR", "startup", "No se pudo conectar a SurrealDB al inicio (se reintentará en el primer request)", err);
+    log("ERROR", "startup", "No se pudo conectar a SurrealDB al inicio", err);
   }
-
-  // Sessions activas: sessionId → { server, transport }
-  const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-    const ts = new Date().toISOString();
 
-    // Health check
     if (url.pathname === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", transport: "streamable-http", sessions: sessions.size }));
+      res.end(JSON.stringify({ status: "ok" }));
       return;
     }
 
-    if (url.pathname === "/mcp") {
-      const method = req.method ?? "?";
-      const sessionId = req.headers["mcp-session-id"] as string | undefined;
-      log("INFO", "HTTP", `${method} /mcp | session-id: ${sessionId ?? "(sin header)"} | sessions activas: ${sessions.size}`);
-
-      let session = sessionId ? sessions.get(sessionId) : undefined;
-
-      if (!session) {
-        // Adoptar el ID propuesto por el cliente; si no trae, generar uno nuevo.
-        // Esto resuelve el caso en que Claude Code pre-genera su propio session ID.
-        const assignedId = sessionId ?? randomUUID();
-        log("INFO", "HTTP", `Sesión desconocida → creando con id: ${assignedId}`);
-
-        const transport = new StreamableHTTPServerTransport({
-          // Devolver el ID adoptado para que cliente y servidor queden sincronizados
-          sessionIdGenerator: () => assignedId,
-          onsessioninitialized: (id) => {
-            log("INFO", "HTTP", `onsessioninitialized: ${id} (transport inicializado correctamente)`);
-            // Belt & suspenders: actualizar el map con el id confirmado
-            sessions.set(id, session!);
-          },
-        });
-
-        const server = createMCPServer();
-        session = { server, transport };
-
-        // Pre-almacenar ANTES de handleRequest para que requests concurrentes
-        // con el mismo session ID reutilicen el mismo transport.
-        sessions.set(assignedId, session);
-
-        transport.onerror = (err) => {
-          log("ERROR", "HTTP", `Transport error (session=${assignedId}): ${err.message}`, err.stack);
-        };
-
-        transport.onclose = () => {
-          log("INFO", "HTTP", `Sesión cerrada: ${assignedId}`);
-          sessions.delete(assignedId);
-        };
-
-        try {
-          await server.connect(transport);
-          log("INFO", "HTTP", `server.connect() OK`);
-        } catch (err) {
-          log("ERROR", "HTTP", `server.connect() falló`, err);
-          sessions.delete(assignedId);
-          res.writeHead(500);
-          res.end("Internal server error");
-          return;
-        }
-      } else {
-        log("INFO", "HTTP", `Sesión reutilizada: ${sessionId}`);
-      }
-
-      try {
-        // Interceptar writeHead para loguear el status de la respuesta
-        const origWriteHead = res.writeHead.bind(res);
-        (res as any).writeHead = (statusCode: number, ...args: any[]) => {
-          const lvl = statusCode >= 400 ? "WARN" : "INFO";
-          log(lvl, "HTTP", `respuesta: ${statusCode}`);
-          return origWriteHead(statusCode, ...args);
-        };
-
-        // El SDK rechaza con 400 cualquier request que traiga mcp-session-id
-        // mientras el transport no esté inicializado (_initialized=false).
-        // Claude Code siempre manda session-id desde el primer request (incluyendo
-        // el initialize), así que lo stripeamos para que el SDK lo trate como
-        // una conexión fresca. El sessionIdGenerator ya devuelve el ID del cliente,
-        // así que la respuesta llevará de vuelta el mismo ID y todo queda sincronizado.
-        if (!session.transport.sessionId && req.headers["mcp-session-id"]) {
-          log("INFO", "HTTP", `Transport no inicializado → stripeando mcp-session-id del request (adoptado en sessionIdGenerator)`);
-          delete (req.headers as any)["mcp-session-id"];
-        }
-
-        await session.transport.handleRequest(req, res);
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        log("ERROR", "HTTP", `handleRequest falló: ${error.message}`, error.stack);
-        if (!res.headersSent) {
-          res.writeHead(500);
-          res.end("Internal server error");
-        }
-      }
+    if (url.pathname !== "/mcp") {
+      res.writeHead(404);
+      res.end("Not found");
       return;
     }
 
-    res.writeHead(404);
-    res.end("Not found");
+    log("INFO", "HTTP", `${req.method} /mcp`);
+
+    // Modo stateless (sessionIdGenerator: undefined):
+    // Cada request recibe un transport fresco — el SDK desactiva la validación
+    // de sesión y acepta GET/POST en cualquier orden sin requerir initialize primero.
+    // Nuestras tools no necesitan estado en memoria (todo vive en SurrealDB),
+    // así que stateless es el modo correcto para este servidor.
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+
+    transport.onerror = (err) => log("ERROR", "HTTP", `Transport: ${err.message}`, err.stack);
+
+    const server = createMCPServer();
+
+    try {
+      await server.connect(transport);
+    } catch (err) {
+      log("ERROR", "HTTP", "server.connect() falló", err);
+      res.writeHead(500);
+      res.end("Internal server error");
+      return;
+    }
+
+    // Loguear el status de la respuesta
+    const origWriteHead = res.writeHead.bind(res);
+    (res as any).writeHead = (statusCode: number, ...args: any[]) => {
+      log(statusCode >= 400 ? "WARN" : "INFO", "HTTP", `respuesta: ${statusCode}`);
+      return origWriteHead(statusCode, ...args);
+    };
+
+    try {
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      log("ERROR", "HTTP", `handleRequest: ${error.message}`, error.stack);
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end("Internal server error");
+      }
+    }
   });
 
   httpServer.listen(PORT, () => {
