@@ -15,6 +15,34 @@ import { storeTheory, storeTheorySchema,
 import { getGoals, getGoalsSchema,
          updateGoalProgress, updateGoalProgressSchema } from "./tools/goals.js";
 
+// ─── Logger helper ────────────────────────────────────────────────────────────
+function log(level: "INFO" | "WARN" | "ERROR", tool: string, msg: string, extra?: unknown) {
+  const ts = new Date().toISOString();
+  if (extra !== undefined) {
+    console.error(`[${ts}] [${level}] [${tool}] ${msg}`, extra);
+  } else {
+    console.error(`[${ts}] [${level}] [${tool}] ${msg}`);
+  }
+}
+
+function toolHandler<T>(name: string, fn: (input: T) => Promise<unknown>) {
+  return async (input: T) => {
+    log("INFO", name, "llamado", input);
+    try {
+      const result = await fn(input);
+      log("INFO", name, "OK");
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      log("ERROR", name, `ERROR: ${error.message}`, error.stack);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ error: error.message }) }],
+        isError: true,
+      };
+    }
+  };
+}
+
 // ─── Factory ──────────────────────────────────────────────────────────────────
 function createMCPServer(): McpServer {
   const server = new McpServer({
@@ -25,73 +53,55 @@ function createMCPServer(): McpServer {
   server.tool("store_memory",
     "Almacena una memoria persistente con embedding semántico",
     storeMemorySchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await storeMemory(input as any)) }]
-    })
+    toolHandler("store_memory", (input) => storeMemory(input as any))
   );
 
   server.tool("retrieve_memories",
     "Recupera memorias relevantes por similitud semántica",
     retrieveMemoriesSchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await retrieveMemories(input as any)) }]
-    })
+    toolHandler("retrieve_memories", (input) => retrieveMemories(input as any))
   );
 
   server.tool("get_session_context",
     "Recupera contexto completo relevante para iniciar una sesión",
     getSessionContextSchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await getSessionContext(input as any)) }]
-    })
+    toolHandler("get_session_context", (input) => getSessionContext(input as any))
   );
 
   server.tool("create_session",
     "Crea una nueva sesión de conversación",
     createSessionSchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await createSession(input as any)) }]
-    })
+    toolHandler("create_session", (input) => createSession(input as any))
   );
 
   server.tool("end_session",
     "Cierra sesión y persiste memorias destiladas",
     endSessionSchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await endSession(input as any)) }]
-    })
+    toolHandler("end_session", (input) => endSession(input as any))
   );
 
   server.tool("store_theory",
     "Almacena una teoría o insight de investigación",
     storeTheorySchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await storeTheory(input as any)) }]
-    })
+    toolHandler("store_theory", (input) => storeTheory(input as any))
   );
 
   server.tool("update_theory",
     "Actualiza estado o contenido de una teoría existente",
     updateTheorySchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await updateTheory(input as any)) }]
-    })
+    toolHandler("update_theory", (input) => updateTheory(input as any))
   );
 
   server.tool("get_goals",
     "Obtiene objetivos y su progreso actual",
     getGoalsSchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await getGoals(input as any)) }]
-    })
+    toolHandler("get_goals", (input) => getGoals(input as any))
   );
 
   server.tool("update_goal_progress",
     "Actualiza el progreso de un objetivo",
     updateGoalProgressSchema.shape,
-    async (input) => ({
-      content: [{ type: "text", text: JSON.stringify(await updateGoalProgress(input as any)) }]
-    })
+    toolHandler("update_goal_progress", (input) => updateGoalProgress(input as any))
   );
 
   return server;
@@ -106,6 +116,8 @@ async function startHTTP() {
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+    const ts = new Date().toISOString();
+    console.error(`[${ts}] [HTTP] ${req.method} ${url.pathname}`);
 
     // Health check
     if (url.pathname === "/health") {
@@ -118,15 +130,16 @@ async function startHTTP() {
     if (url.pathname === "/mcp") {
       // Recuperar sesión existente o crear nueva
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
+      console.error(`[${ts}] [HTTP] mcp-session-id: ${sessionId ?? "(nueva sesión)"}`);
 
       let session = sessionId ? sessions.get(sessionId) : undefined;
 
       if (!session) {
-        // Nueva sesión
+        console.error(`[${ts}] [HTTP] Creando nueva sesión MCP`);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
-            // Mover al map con el id real asignado por el transport
+            console.error(`[${new Date().toISOString()}] [HTTP] Sesión inicializada: ${id}`);
             sessions.set(id, session!);
           },
         });
@@ -136,13 +149,30 @@ async function startHTTP() {
 
         transport.onclose = () => {
           const id = transport.sessionId;
+          console.error(`[${new Date().toISOString()}] [HTTP] Sesión cerrada: ${id}`);
           if (id) sessions.delete(id);
         };
 
-        await server.connect(transport);
+        try {
+          await server.connect(transport);
+        } catch (err) {
+          console.error(`[${new Date().toISOString()}] [HTTP] ERROR al conectar servidor MCP:`, err);
+          res.writeHead(500);
+          res.end("Internal server error");
+          return;
+        }
       }
 
-      await session.transport.handleRequest(req, res);
+      try {
+        await session.transport.handleRequest(req, res);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        console.error(`[${new Date().toISOString()}] [HTTP] ERROR en handleRequest: ${error.message}`, error.stack);
+        if (!res.headersSent) {
+          res.writeHead(500);
+          res.end("Internal server error");
+        }
+      }
       return;
     }
 
