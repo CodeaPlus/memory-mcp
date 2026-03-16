@@ -188,6 +188,17 @@ async function startHTTP() {
           return origWriteHead(statusCode, ...args);
         };
 
+        // El SDK rechaza con 400 cualquier request que traiga mcp-session-id
+        // mientras el transport no esté inicializado (_initialized=false).
+        // Claude Code siempre manda session-id desde el primer request (incluyendo
+        // el initialize), así que lo stripeamos para que el SDK lo trate como
+        // una conexión fresca. El sessionIdGenerator ya devuelve el ID del cliente,
+        // así que la respuesta llevará de vuelta el mismo ID y todo queda sincronizado.
+        if (!session.transport.sessionId && req.headers["mcp-session-id"]) {
+          log("INFO", "HTTP", `Transport no inicializado → stripeando mcp-session-id del request (adoptado en sessionIdGenerator)`);
+          delete (req.headers as any)["mcp-session-id"];
+        }
+
         await session.transport.handleRequest(req, res);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));

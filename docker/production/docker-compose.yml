@@ -1,7 +1,7 @@
 services:
   memory-mcp:
     image: memory-mcp:latest
-    build: 
+    build:
       context: ../..
       dockerfile: docker/production/Dockerfile
     container_name: memory-mcp
@@ -16,5 +16,11 @@ services:
       SURREAL_DB: test
       SURREAL_USER: root
       SURREAL_PASS: awesomepassword
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - default
