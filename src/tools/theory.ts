@@ -37,3 +37,35 @@ export async function updateTheory(input: z.infer<typeof updateTheorySchema>) {
   );
   return { status: "updated" };
 }
+
+// ─── Search Theories ──────────────────────────────────────────────────────────
+
+export const searchTheoriesSchema = z.object({
+  query:  z.string().describe("Texto para buscar teorías por similitud semántica"),
+  domain: z.enum(["physics", "computing", "energy", "cross", "all"]).default("all"),
+  status: z.enum(["raw", "developing", "formalized", "published", "all"]).default("all"),
+  limit:  z.number().default(5),
+});
+
+export const linkTheorySessionSchema = z.object({
+  theory_id:  z.string().describe("ID de la teoría (ej: theory:abc123)"),
+  session_id: z.string().describe("ID de la sesión de donde surgió la teoría"),
+});
+
+export async function searchTheories(input: z.infer<typeof searchTheoriesSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown[]]>(
+    `RETURN fn::search_theories($query, $domain, $status, $limit)`,
+    input
+  );
+  return result ?? [];
+}
+
+export async function linkTheorySession(input: z.infer<typeof linkTheorySessionSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown]>(
+    `RETURN fn::link_theory_session(type::thing($theory_id), type::thing($session_id))`,
+    input
+  );
+  return { status: "linked", edge: result };
+}

@@ -8,11 +8,24 @@ import { storeMemory, storeMemorySchema,
          retrieveMemories, retrieveMemoriesSchema } from "./tools/memory.js";
 import { createSession, createSessionSchema,
          endSession, endSessionSchema,
-         getSessionContext, getSessionContextSchema } from "./tools/session.js";
+         getSessionContext, getSessionContextSchema,
+         addMessage, addMessageSchema,
+         getMessages, getMessagesSchema,
+         listSessions, listSessionsSchema } from "./tools/session.js";
 import { storeTheory, storeTheorySchema,
-         updateTheory, updateTheorySchema } from "./tools/theory.js";
+         updateTheory, updateTheorySchema,
+         searchTheories, searchTheoriesSchema,
+         linkTheorySession, linkTheorySessionSchema } from "./tools/theory.js";
 import { getGoals, getGoalsSchema,
-         updateGoalProgress, updateGoalProgressSchema } from "./tools/goals.js";
+         updateGoalProgress, updateGoalProgressSchema,
+         createGoal, createGoalSchema,
+         addMilestone, addMilestoneSchema,
+         completeMilestone, completeMilestoneSchema,
+         updateGoalStatus, updateGoalStatusSchema } from "./tools/goals.js";
+import { createConcept, createConceptSchema,
+         relateConcepts, relateConceptsSchema,
+         searchConcepts, searchConceptsSchema,
+         getConceptGraph, getConceptGraphSchema } from "./tools/concepts.js";
 import { getDB } from "./db.js";
 
 // ─── Logger ───────────────────────────────────────────────────────────────────
@@ -45,15 +58,37 @@ function toolHandler<T>(name: string, fn: (input: T) => Promise<unknown>) {
 function createMCPServer(): McpServer {
   const server = new McpServer({ name: "memory-mcp", version: "1.0.0" });
 
+  // ── Memory ────────────────────────────────────────────────────────────────
   server.registerTool("store_memory",        { description: "Almacena una memoria persistente con embedding semántico",  inputSchema: storeMemorySchema.shape        }, toolHandler("store_memory",        (i) => storeMemory(i as any)));
   server.registerTool("retrieve_memories",   { description: "Recupera memorias relevantes por similitud semántica",      inputSchema: retrieveMemoriesSchema.shape   }, toolHandler("retrieve_memories",   (i) => retrieveMemories(i as any)));
-  server.registerTool("get_session_context", { description: "Recupera contexto completo relevante para iniciar sesión",  inputSchema: getSessionContextSchema.shape  }, toolHandler("get_session_context", (i) => getSessionContext(i as any)));
+
+  // ── Session ───────────────────────────────────────────────────────────────
   server.registerTool("create_session",      { description: "Crea una nueva sesión de conversación",                     inputSchema: createSessionSchema.shape      }, toolHandler("create_session",      (i) => createSession(i as any)));
   server.registerTool("end_session",         { description: "Cierra sesión y persiste memorias destiladas",              inputSchema: endSessionSchema.shape         }, toolHandler("end_session",         (i) => endSession(i as any)));
+  server.registerTool("get_session_context", { description: "Recupera contexto completo relevante para iniciar sesión",  inputSchema: getSessionContextSchema.shape  }, toolHandler("get_session_context", (i) => getSessionContext(i as any)));
+  server.registerTool("list_sessions",       { description: "Lista sesiones pasadas filtradas por dominio",              inputSchema: listSessionsSchema.shape       }, toolHandler("list_sessions",       (i) => listSessions(i as any)));
+  server.registerTool("add_message",         { description: "Agrega un mensaje (user/assistant) a una sesión",          inputSchema: addMessageSchema.shape         }, toolHandler("add_message",         (i) => addMessage(i as any)));
+  server.registerTool("get_messages",        { description: "Recupera el historial de mensajes de una sesión",          inputSchema: getMessagesSchema.shape        }, toolHandler("get_messages",        (i) => getMessages(i as any)));
+
+  // ── Theory ────────────────────────────────────────────────────────────────
   server.registerTool("store_theory",        { description: "Almacena una teoría o insight de investigación",            inputSchema: storeTheorySchema.shape        }, toolHandler("store_theory",        (i) => storeTheory(i as any)));
   server.registerTool("update_theory",       { description: "Actualiza estado o contenido de una teoría existente",      inputSchema: updateTheorySchema.shape       }, toolHandler("update_theory",       (i) => updateTheory(i as any)));
-  server.registerTool("get_goals",           { description: "Obtiene objetivos y su progreso actual",                    inputSchema: getGoalsSchema.shape           }, toolHandler("get_goals",           (i) => getGoals(i as any)));
-  server.registerTool("update_goal_progress",{ description: "Actualiza el progreso de un objetivo",                     inputSchema: updateGoalProgressSchema.shape }, toolHandler("update_goal_progress",(i) => updateGoalProgress(i as any)));
+  server.registerTool("search_theories",     { description: "Busca teorías por similitud semántica",                     inputSchema: searchTheoriesSchema.shape     }, toolHandler("search_theories",     (i) => searchTheories(i as any)));
+  server.registerTool("link_theory_session", { description: "Vincula una teoría a la sesión de donde surgió",           inputSchema: linkTheorySessionSchema.shape  }, toolHandler("link_theory_session", (i) => linkTheorySession(i as any)));
+
+  // ── Goals ─────────────────────────────────────────────────────────────────
+  server.registerTool("get_goals",            { description: "Obtiene objetivos y su progreso actual",                   inputSchema: getGoalsSchema.shape            }, toolHandler("get_goals",            (i) => getGoals(i as any)));
+  server.registerTool("create_goal",          { description: "Crea un nuevo objetivo con métricas y deadline",          inputSchema: createGoalSchema.shape          }, toolHandler("create_goal",          (i) => createGoal(i as any)));
+  server.registerTool("update_goal_progress", { description: "Actualiza el progreso numérico de un objetivo",           inputSchema: updateGoalProgressSchema.shape  }, toolHandler("update_goal_progress", (i) => updateGoalProgress(i as any)));
+  server.registerTool("update_goal_status",   { description: "Cambia el status de un objetivo (active/completed)",      inputSchema: updateGoalStatusSchema.shape    }, toolHandler("update_goal_status",   (i) => updateGoalStatus(i as any)));
+  server.registerTool("add_milestone",        { description: "Agrega un milestone a un objetivo",                       inputSchema: addMilestoneSchema.shape        }, toolHandler("add_milestone",        (i) => addMilestone(i as any)));
+  server.registerTool("complete_milestone",   { description: "Marca un milestone como completado",                      inputSchema: completeMilestoneSchema.shape   }, toolHandler("complete_milestone",   (i) => completeMilestone(i as any)));
+
+  // ── Concepts ──────────────────────────────────────────────────────────────
+  server.registerTool("create_concept",       { description: "Crea un concepto en el grafo de conocimiento",            inputSchema: createConceptSchema.shape       }, toolHandler("create_concept",       (i) => createConcept(i as any)));
+  server.registerTool("relate_concepts",      { description: "Crea una relación entre dos conceptos del grafo",         inputSchema: relateConceptsSchema.shape      }, toolHandler("relate_concepts",      (i) => relateConcepts(i as any)));
+  server.registerTool("search_concepts",      { description: "Busca conceptos por similitud semántica",                 inputSchema: searchConceptsSchema.shape      }, toolHandler("search_concepts",      (i) => searchConcepts(i as any)));
+  server.registerTool("get_concept_graph",    { description: "Obtiene un concepto y todas sus relaciones",              inputSchema: getConceptGraphSchema.shape     }, toolHandler("get_concept_graph",    (i) => getConceptGraph(i as any)));
 
   return server;
 }

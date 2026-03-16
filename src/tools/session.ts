@@ -70,3 +70,48 @@ export async function getSessionContext(
   );
   return result;
 }
+
+// ─── Messages ─────────────────────────────────────────────────────────────────
+
+export const addMessageSchema = z.object({
+  session_id: z.string().describe("ID de la sesión"),
+  role:       z.enum(["user", "assistant"]),
+  content:    z.string(),
+});
+
+export const getMessagesSchema = z.object({
+  session_id: z.string().describe("ID de la sesión"),
+  limit:      z.number().default(50),
+});
+
+export const listSessionsSchema = z.object({
+  domain: z.enum(["research", "business", "mixed", "all"]).default("all"),
+  limit:  z.number().default(10),
+});
+
+export async function addMessage(input: z.infer<typeof addMessageSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown]>(
+    `RETURN fn::add_message(type::thing($session_id), $role, $content)`,
+    input
+  );
+  return { status: "added", record: result };
+}
+
+export async function getMessages(input: z.infer<typeof getMessagesSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown[]]>(
+    `RETURN fn::get_messages(type::thing($session_id), $limit)`,
+    input
+  );
+  return result ?? [];
+}
+
+export async function listSessions(input: z.infer<typeof listSessionsSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown[]]>(
+    `RETURN fn::list_sessions($domain, $limit)`,
+    input
+  );
+  return result ?? [];
+}
