@@ -33,7 +33,6 @@ export async function createSession(
     domain: input.domain,
     summary: "",
     topics: [],
-    created_at: new Date().toISOString(),
   });
   return { session_id: (result as any).id?.toString() };
 }

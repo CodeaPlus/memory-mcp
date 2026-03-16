@@ -26,7 +26,7 @@ export async function storeTheory(input: z.infer<typeof storeTheorySchema>) {
 
 export async function updateTheory(input: z.infer<typeof updateTheorySchema>) {
   const db = await getDB();
-  const fields: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const fields: Record<string, unknown> = {};
   if (input.content) fields.content = input.content;
   if (input.status)  fields.status  = input.status;
   if (input.tags)    fields.tags    = input.tags;
