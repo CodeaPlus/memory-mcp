@@ -128,19 +128,27 @@ async function startHTTP() {
 
     // Único endpoint MCP
     if (url.pathname === "/mcp") {
-      // Recuperar sesión existente o crear nueva
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
-      console.error(`[${ts}] [HTTP] mcp-session-id: ${sessionId ?? "(nueva sesión)"}`);
+      console.error(`[${ts}] [HTTP] mcp-session-id: ${sessionId ?? "(sin header)"}`);
+      console.error(`[${ts}] [HTTP] Sessions activas en map: [${[...sessions.keys()].join(", ") || "vacío"}]`);
 
       let session = sessionId ? sessions.get(sessionId) : undefined;
+      console.error(`[${ts}] [HTTP] Sesión encontrada en map: ${session ? "SÍ" : "NO"}`);
 
       if (!session) {
         console.error(`[${ts}] [HTTP] Creando nueva sesión MCP`);
+        const newId = randomUUID();
+        console.error(`[${ts}] [HTTP] sessionIdGenerator producirá: ${newId}`);
+
         const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
+          sessionIdGenerator: () => {
+            console.error(`[${new Date().toISOString()}] [HTTP] sessionIdGenerator llamado → ${newId}`);
+            return newId;
+          },
           onsessioninitialized: (id) => {
-            console.error(`[${new Date().toISOString()}] [HTTP] Sesión inicializada: ${id}`);
+            console.error(`[${new Date().toISOString()}] [HTTP] onsessioninitialized llamado con id=${id}, session definida=${session !== undefined}`);
             sessions.set(id, session!);
+            console.error(`[${new Date().toISOString()}] [HTTP] Sessions después de guardar: [${[...sessions.keys()].join(", ")}]`);
           },
         });
 
@@ -155,6 +163,7 @@ async function startHTTP() {
 
         try {
           await server.connect(transport);
+          console.error(`[${ts}] [HTTP] server.connect() completado, transport.sessionId=${transport.sessionId}`);
         } catch (err) {
           console.error(`[${new Date().toISOString()}] [HTTP] ERROR al conectar servidor MCP:`, err);
           res.writeHead(500);
@@ -164,7 +173,9 @@ async function startHTTP() {
       }
 
       try {
+        console.error(`[${ts}] [HTTP] Llamando handleRequest...`);
         await session.transport.handleRequest(req, res);
+        console.error(`[${ts}] [HTTP] handleRequest completado`);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         console.error(`[${new Date().toISOString()}] [HTTP] ERROR en handleRequest: ${error.message}`, error.stack);
