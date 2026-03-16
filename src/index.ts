@@ -128,8 +128,12 @@ async function startHTTP() {
 
     // Único endpoint MCP
     if (url.pathname === "/mcp") {
+      // Log de todos los headers relevantes del request
+      const relevantHeaders = ["accept", "content-type", "mcp-session-id", "mcp-protocol-version"];
+      for (const h of relevantHeaders) {
+        console.error(`[${ts}] [HTTP] header ${h}: ${req.headers[h] ?? "(ausente)"}`);
+      }
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
-      console.error(`[${ts}] [HTTP] mcp-session-id: ${sessionId ?? "(sin header)"}`);
       console.error(`[${ts}] [HTTP] Sessions activas en map: [${[...sessions.keys()].join(", ") || "vacío"}]`);
 
       let session = sessionId ? sessions.get(sessionId) : undefined;
@@ -173,6 +177,12 @@ async function startHTTP() {
       }
 
       try {
+        // Interceptar writeHead para loguear el status code de la respuesta
+        const origWriteHead = res.writeHead.bind(res);
+        (res as any).writeHead = (statusCode: number, ...args: any[]) => {
+          console.error(`[${new Date().toISOString()}] [HTTP] respuesta status: ${statusCode}`);
+          return origWriteHead(statusCode, ...args);
+        };
         console.error(`[${ts}] [HTTP] Llamando handleRequest...`);
         await session.transport.handleRequest(req, res);
         console.error(`[${ts}] [HTTP] handleRequest completado`);
