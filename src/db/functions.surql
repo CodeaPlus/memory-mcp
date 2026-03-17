@@ -4,6 +4,7 @@
 -- ============================================================
 
 -- ── Base: embedding vía fastembed ───────────────────────────
+REMOVE FUNCTION IF EXISTS fn::embed;
 DEFINE FUNCTION fn::embed($text: string) {
     LET $response = http::post(
         "http://fastembed:8000/embeddings",
@@ -13,6 +14,7 @@ DEFINE FUNCTION fn::embed($text: string) {
 };
 
 -- ── Memory ──────────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::store_memory;
 DEFINE FUNCTION fn::store_memory(
     $content: string,
     $type: string,
@@ -33,13 +35,21 @@ DEFINE FUNCTION fn::store_memory(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::update_memory;
 DEFINE FUNCTION fn::update_memory(
     $memory_id: record<memory>,
     $data: object
 ) {
-    RETURN UPDATE $memory_id MERGE $data;
+    IF $data.content != NONE {
+        LET $embedding = fn::embed($data.content);
+        UPDATE $memory_id MERGE $data;
+        RETURN UPDATE $memory_id SET embedding = $embedding, updated_at = time::now();
+    };
+    UPDATE $memory_id MERGE $data;
+    RETURN UPDATE $memory_id SET updated_at = time::now();
 };
 
+REMOVE FUNCTION IF EXISTS fn::search_memories;
 DEFINE FUNCTION fn::search_memories(
     $query: string,
     $domain: string,
@@ -48,7 +58,7 @@ DEFINE FUNCTION fn::search_memories(
 ) {
     LET $embedding = fn::embed($query);
     RETURN (
-        SELECT content, type, domain, importance,
+        SELECT id, content, type, domain, importance, source,
             vector::similarity::cosine(embedding, $embedding) AS score
         FROM memory
         WHERE vector::similarity::cosine(embedding, $embedding) > $threshold
@@ -59,6 +69,7 @@ DEFINE FUNCTION fn::search_memories(
 };
 
 -- ── Theory ──────────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::store_theory;
 DEFINE FUNCTION fn::store_theory(
     $title: string,
     $content: string,
@@ -78,6 +89,7 @@ DEFINE FUNCTION fn::store_theory(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::search_theories;
 DEFINE FUNCTION fn::search_theories(
     $query: string,
     $domain: string,
@@ -97,6 +109,7 @@ DEFINE FUNCTION fn::search_theories(
     );
 };
 
+REMOVE FUNCTION IF EXISTS fn::link_theory_session;
 DEFINE FUNCTION fn::link_theory_session(
     $theory_id: record<theory>,
     $session_id: record<session>
@@ -105,6 +118,7 @@ DEFINE FUNCTION fn::link_theory_session(
 };
 
 -- ── Session ─────────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::get_session_context;
 DEFINE FUNCTION fn::get_session_context($query: string) {
     LET $embedding = fn::embed($query);
     LET $memories = (
@@ -141,6 +155,7 @@ DEFINE FUNCTION fn::get_session_context($query: string) {
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::list_sessions;
 DEFINE FUNCTION fn::list_sessions($domain: string, $limit: int) {
     RETURN (
         SELECT id, summary, topics, domain, created_at
@@ -152,6 +167,7 @@ DEFINE FUNCTION fn::list_sessions($domain: string, $limit: int) {
 };
 
 -- ── Messages ────────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::add_message;
 DEFINE FUNCTION fn::add_message(
     $session_id: record<session>,
     $role: string,
@@ -167,6 +183,7 @@ DEFINE FUNCTION fn::add_message(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::get_messages;
 DEFINE FUNCTION fn::get_messages($session_id: record<session>, $limit: int) {
     RETURN (
         SELECT role, content, created_at
@@ -178,6 +195,7 @@ DEFINE FUNCTION fn::get_messages($session_id: record<session>, $limit: int) {
 };
 
 -- ── Goals ───────────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::create_goal;
 DEFINE FUNCTION fn::create_goal(
     $title: string,
     $description: string,
@@ -200,6 +218,7 @@ DEFINE FUNCTION fn::create_goal(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::add_milestone;
 DEFINE FUNCTION fn::add_milestone(
     $goal_id: record<goal>,
     $title: string,
@@ -215,17 +234,20 @@ DEFINE FUNCTION fn::add_milestone(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::complete_milestone;
 DEFINE FUNCTION fn::complete_milestone($milestone_id: record<milestone>) {
     RETURN UPDATE $milestone_id SET
         completed    = true,
         completed_at = time::now();
 };
 
+REMOVE FUNCTION IF EXISTS fn::update_goal_status;
 DEFINE FUNCTION fn::update_goal_status($goal_id: record<goal>, $status: string) {
     RETURN UPDATE $goal_id SET status = $status;
 };
 
 -- ── Concepts ────────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::create_concept;
 DEFINE FUNCTION fn::create_concept(
     $name: string,
     $description: string,
@@ -242,6 +264,7 @@ DEFINE FUNCTION fn::create_concept(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::relate_concepts;
 DEFINE FUNCTION fn::relate_concepts(
     $from: record<concept>,
     $to: record<concept>,
@@ -254,6 +277,7 @@ DEFINE FUNCTION fn::relate_concepts(
     };
 };
 
+REMOVE FUNCTION IF EXISTS fn::search_concepts;
 DEFINE FUNCTION fn::search_concepts(
     $query: string,
     $domain: string,
@@ -271,6 +295,7 @@ DEFINE FUNCTION fn::search_concepts(
     );
 };
 
+REMOVE FUNCTION IF EXISTS fn::get_concept_graph;
 DEFINE FUNCTION fn::get_concept_graph($concept_id: record<concept>) {
     LET $node = (SELECT id, name, description, domain, importance FROM $concept_id)[0];
     LET $edges = (

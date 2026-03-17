@@ -57,7 +57,7 @@ export async function retrieveMemories(input: z.infer<typeof retrieveMemoriesSch
 
 export async function updateMemory(input: z.infer<typeof updateMemorySchema>) {
   const db = await getDB();
-  const data: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const data: Record<string, unknown> = {};
   if (input.content    !== undefined) data.content    = input.content;
   if (input.type       !== undefined) data.type       = input.type;
   if (input.domain     !== undefined) data.domain     = input.domain;
