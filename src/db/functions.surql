@@ -17,7 +17,8 @@ DEFINE FUNCTION fn::store_memory(
     $content: string,
     $type: string,
     $domain: string,
-    $importance: int
+    $importance: int,
+    $source: option<record>
 ) {
     LET $embedding = fn::embed($content);
     RETURN CREATE memory CONTENT {
@@ -26,9 +27,17 @@ DEFINE FUNCTION fn::store_memory(
         type:       $type,
         domain:     $domain,
         importance: $importance,
+        source:     $source,
         created_at: time::now(),
         updated_at: time::now()
     };
+};
+
+DEFINE FUNCTION fn::update_memory(
+    $memory_id: record<memory>,
+    $data: object
+) {
+    RETURN UPDATE $memory_id MERGE $data;
 };
 
 DEFINE FUNCTION fn::search_memories(

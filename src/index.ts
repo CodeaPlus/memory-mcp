@@ -5,7 +5,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 
 import { storeMemory, storeMemorySchema,
-         retrieveMemories, retrieveMemoriesSchema } from "./tools/memory.js";
+         retrieveMemories, retrieveMemoriesSchema,
+         updateMemory, updateMemorySchema } from "./tools/memory.js";
 import { createSession, createSessionSchema,
          endSession, endSessionSchema,
          getSessionContext, getSessionContextSchema,
@@ -61,6 +62,7 @@ function createMCPServer(): McpServer {
   // ── Memory ────────────────────────────────────────────────────────────────
   server.registerTool("store_memory",        { description: "Almacena una memoria persistente con embedding semántico",  inputSchema: storeMemorySchema.shape        }, toolHandler("store_memory",        (i) => storeMemory(i as any)));
   server.registerTool("retrieve_memories",   { description: "Recupera memorias relevantes por similitud semántica",      inputSchema: retrieveMemoriesSchema.shape   }, toolHandler("retrieve_memories",   (i) => retrieveMemories(i as any)));
+  server.registerTool("update_memory",       { description: "Actualiza contenido, tipo, dominio, importancia o fuente de una memoria existente", inputSchema: updateMemorySchema.shape }, toolHandler("update_memory", (i) => updateMemory(i as any)));
 
   // ── Session ───────────────────────────────────────────────────────────────
   server.registerTool("create_session",      { description: "Crea una nueva sesión de conversación",                     inputSchema: createSessionSchema.shape      }, toolHandler("create_session",      (i) => createSession(i as any)));
