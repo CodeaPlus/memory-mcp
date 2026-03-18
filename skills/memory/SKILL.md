@@ -18,8 +18,8 @@ aprendiendo o persiguiendo.
 
 ## Identificar los tools del MCP
 
-Los tools de este skill siguen el patrón `mcp__<server-id>__<tool-name>`. El `server-id`
-varía según el cliente y la instalación. Al inicio de la conversación, identifica el
+Los tools de este skill siguen el patrón `mcp__<server-id>__<tool-name>` o puede ser úbicado con el nombre de `memoria`. 
+El `server-id` varía según el cliente y la instalación. Al inicio de la conversación, identifica el
 servidor correcto buscando en los tools disponibles uno que exponga `store_memory`,
 `retrieve_memories` y `get_session_context`. Usa el prefijo de ese servidor para todas
 las llamadas de este skill.
