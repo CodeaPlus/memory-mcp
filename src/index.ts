@@ -2,6 +2,7 @@ import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 
 import { storeMemory, storeMemorySchema,
@@ -107,6 +108,9 @@ async function startHTTP() {
     log("ERROR", "startup", "No se pudo conectar a SurrealDB al inicio", err);
   }
 
+  // SSE legacy: mapa de transports activos por sessionId
+  const sseSessions = new Map<string, SSEServerTransport>();
+
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
 
@@ -116,6 +120,34 @@ async function startHTTP() {
       return;
     }
 
+    // ── SSE legacy: GET /sse abre el stream ──────────────────────────────────
+    if (url.pathname === "/sse" && req.method === "GET") {
+      log("INFO", "SSE", "cliente conectado");
+      const transport = new SSEServerTransport("/messages", res);
+      sseSessions.set(transport.sessionId, transport);
+      res.on("close", () => {
+        sseSessions.delete(transport.sessionId);
+        log("INFO", "SSE", `sesión ${transport.sessionId} cerrada`);
+      });
+      const server = createMCPServer();
+      await server.connect(transport);
+      return;
+    }
+
+    // ── SSE legacy: POST /messages envía mensajes ────────────────────────────
+    if (url.pathname === "/messages" && req.method === "POST") {
+      const sessionId = url.searchParams.get("sessionId") ?? "";
+      const transport = sseSessions.get(sessionId);
+      if (!transport) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Sesión SSE no encontrada: ${sessionId}` }));
+        return;
+      }
+      await transport.handlePostMessage(req, res);
+      return;
+    }
+
+    // ── StreamableHTTP: POST /mcp ────────────────────────────────────────────
     if (url.pathname !== "/mcp") {
       res.writeHead(404);
       res.end("Not found");
@@ -124,11 +156,6 @@ async function startHTTP() {
 
     log("INFO", "HTTP", `${req.method} /mcp`);
 
-    // Modo stateless (sessionIdGenerator: undefined):
-    // Cada request recibe un transport fresco — el SDK desactiva la validación
-    // de sesión y acepta GET/POST en cualquier orden sin requerir initialize primero.
-    // Nuestras tools no necesitan estado en memoria (todo vive en SurrealDB),
-    // así que stateless es el modo correcto para este servidor.
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
@@ -146,7 +173,6 @@ async function startHTTP() {
       return;
     }
 
-    // Loguear el status de la respuesta
     const origWriteHead = res.writeHead.bind(res);
     (res as any).writeHead = (statusCode: number, ...args: any[]) => {
       log(statusCode >= 400 ? "WARN" : "INFO", "HTTP", `respuesta: ${statusCode}`);
