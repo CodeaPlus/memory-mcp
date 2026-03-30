@@ -35,7 +35,7 @@ export async function storeMemory(input: z.infer<typeof storeMemorySchema>) {
       type:       input.type,
       domain:     input.domain,
       importance: input.importance,
-      source:     input.source ? new StringRecordId(input.source) : null,
+      source:     input.source ? new StringRecordId(input.source) : undefined,
     }
   );
   return { status: "stored", record: result };
