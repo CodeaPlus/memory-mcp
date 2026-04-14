@@ -7,13 +7,12 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
 
-const SKILL_DIR   = dirname(fileURLToPath(import.meta.url));
-const PROMPT_HOOK = join(SKILL_DIR, "hooks", "hook-prompt-submit.mjs");
-const STOP_HOOK   = join(SKILL_DIR, "hooks", "hook-stop.mjs");
+const HOOKS_DIR   = join(homedir(), ".claude", "hooks", "memory");
+const PROMPT_HOOK = join(HOOKS_DIR, "hook-prompt-submit.mjs");
+const STOP_HOOK   = join(HOOKS_DIR, "hook-stop.mjs");
 
 const CLAUDE_DIR    = join(homedir(), ".claude");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");

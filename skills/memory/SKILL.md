@@ -135,12 +135,12 @@ Determina el directorio home del usuario:
 - **Mac/Linux**: `~` — obtenerlo con Bash: `echo $HOME`
 
 Las rutas destino son:
-- Hooks: `<HOME>/.claude/skills/memory/hooks/`
+- Hooks: `<HOME>/.claude/hooks/memory/`
 - Settings: `<HOME>/.claude/settings.json`
 
 ### Paso 2 — Escribir los hooks
 
-Crea el directorio `<HOME>/.claude/skills/memory/hooks/` si no existe y escribe estos dos archivos:
+Crea el directorio `<HOME>/.claude/hooks/memory/` si no existe y escribe estos dos archivos:
 
 **Archivo: `hook-prompt-submit.mjs`**
 ```javascript
