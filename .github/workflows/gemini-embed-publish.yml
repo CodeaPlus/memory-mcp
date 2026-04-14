@@ -1,14 +1,11 @@
-name: Build & Push to Registry
+name: Build & Push gemini-embed
 
 on:
   push:
     branches:
       - main
     paths:
-      - "src/**"
-      - "docker/production/**"
-      - "package*.json"
-      - "tsconfig.json"
+      - "docker/gemini-embed/**"
 
 jobs:
   build-and-push:
@@ -31,11 +28,10 @@ jobs:
       - name: Build & push
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: docker/production/Dockerfile
+          context: docker/gemini-embed
+          file: docker/gemini-embed/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.REGISTRY_URL }}/memory-mcp:latest
-          # Cache en GitHub Actions (no en el registry privado) para evitar layers grandes
+          tags: ${{ secrets.REGISTRY_URL }}/gemini-embed:latest
           cache-from: type=gha
           cache-to: type=gha,mode=min
