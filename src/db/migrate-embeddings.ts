@@ -15,7 +15,8 @@
  */
 
 import "dotenv/config";
-import Surreal, { StringRecordId } from "surrealdb";
+import { Surreal, createRemoteEngines } from "surrealdb";
+import { createNodeEngines } from "@surrealdb/node";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -144,10 +145,12 @@ async function main() {
   }
 
   // Conectar a SurrealDB
-  const db = new Surreal();
-  await db.connect(SURREAL_URL);
-  await db.use({ namespace: SURREAL_NS, database: SURREAL_DB });
-  await db.signin({ username: SURREAL_USER, password: SURREAL_PASS });
+  const db = new Surreal({ engines: { ...createRemoteEngines(), ...createNodeEngines() } });
+  await db.connect(SURREAL_URL, {
+    namespace: SURREAL_NS,
+    database:  SURREAL_DB,
+    authentication: { username: SURREAL_USER, password: SURREAL_PASS },
+  });
   console.log("SurrealDB conectado\n");
 
   for (const table of TARGET_TABLES) {
