@@ -349,44 +349,39 @@ DEFINE FUNCTION fn::get_memory_detail($memory_id: record<memory>) {
 };
 
 -- ── P3: Consolidación de memorias ────────────────────────────────────────────
--- Devuelve clusters de memorias con alta similitud mutua para que el LLM
+-- Devuelve pares de memorias con similitud >= threshold para que el LLM
 -- decida cuáles sintetizar, fusionar o eliminar.
+-- Enfoque simple: tomamos candidatas y buscamos similares con un query por registro.
 REMOVE FUNCTION IF EXISTS fn::consolidate_memories;
 DEFINE FUNCTION fn::consolidate_memories(
     $domain: string,
     $threshold: float,
     $limit: int
 ) {
-    -- Tomamos las memorias con menor importancia primero (candidatas a consolidar)
     LET $candidates = (
-        SELECT id, content, embedding, type, domain, importance, created_at
+        SELECT id, content, type, domain, importance, embedding
         FROM memory
         WHERE $domain = "all" OR domain = $domain
-        ORDER BY importance ASC, created_at ASC
+        ORDER BY importance ASC
         LIMIT $limit
     );
-    -- Para cada candidata buscamos memorias similares
-    LET $clusters = (
-        SELECT
-            id AS anchor_id,
-            content AS anchor_content,
-            type,
-            domain,
-            importance,
-            (SELECT id, content, importance,
-                vector::similarity::cosine(embedding, $parent.embedding) AS sim
-             FROM memory
-             WHERE id != $parent.id
-               AND vector::similarity::cosine(embedding, $parent.embedding) >= $threshold
-             ORDER BY sim DESC
-             LIMIT 5) AS similar
-        FROM $candidates
-        WHERE array::len(
-            (SELECT id FROM memory
-             WHERE id != $parent.id
-               AND vector::similarity::cosine(embedding, $parent.embedding) >= $threshold
-             LIMIT 1)
-        ) > 0
-    );
-    RETURN $clusters;
+    RETURN array::map($candidates, |$m| {
+        LET $similar = (
+            SELECT id, content, type, importance,
+                vector::similarity::cosine(embedding, $m.embedding) AS score
+            FROM memory
+            WHERE id != $m.id
+              AND vector::similarity::cosine(embedding, $m.embedding) >= $threshold
+            ORDER BY score DESC
+            LIMIT 5
+        );
+        RETURN {
+            anchor_id:      $m.id,
+            anchor_content: $m.content,
+            type:           $m.type,
+            domain:         $m.domain,
+            importance:     $m.importance,
+            similar:        $similar
+        };
+    });
 };
