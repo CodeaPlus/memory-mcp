@@ -145,7 +145,8 @@ DEFINE FUNCTION fn::get_session_context($query: string) {
         LIMIT 3
     );
     LET $last_session = (
-        SELECT summary, topics, domain, created_at
+        SELECT summary, topics, domain, created_at,
+               investigated, learned, completed, next_steps
         FROM session
         ORDER BY created_at DESC
         LIMIT 1
@@ -272,10 +273,12 @@ DEFINE FUNCTION fn::relate_concepts(
     $from: record<concept>,
     $to: record<concept>,
     $strength: float,
+    $confidence: string,
     $description: option<string>
 ) {
     RETURN RELATE $from->relates_to->$to CONTENT {
         strength:    $strength,
+        confidence:  $confidence,
         description: $description
     };
 };
@@ -304,6 +307,7 @@ DEFINE FUNCTION fn::get_concept_graph($concept_id: record<concept>) {
     LET $edges = (
         SELECT
             ->relates_to.strength    AS strength,
+            ->relates_to.confidence  AS confidence,
             ->relates_to.description AS rel_description,
             ->relates_to->concept.*  AS related
         FROM $concept_id
@@ -312,4 +316,77 @@ DEFINE FUNCTION fn::get_concept_graph($concept_id: record<concept>) {
         concept:  $node,
         related:  $edges
     };
+};
+
+-- ── P4: Búsqueda en 3 capas ──────────────────────────────────────────────────
+-- Capa 1: índice ligero — devuelve solo ID, snippet y score para filtrar rápido
+REMOVE FUNCTION IF EXISTS fn::search_memories_index;
+DEFINE FUNCTION fn::search_memories_index(
+    $query: string,
+    $domain: string,
+    $limit: int,
+    $threshold: float
+) {
+    LET $embedding = fn::embed($query);
+    RETURN (
+        SELECT id,
+            string::slice(content, 0, 120) AS snippet,
+            type, domain, importance,
+            vector::similarity::cosine(embedding, $embedding) AS score
+        FROM memory
+        WHERE vector::similarity::cosine(embedding, $embedding) > $threshold
+          AND ($domain = "all" OR domain = $domain)
+        ORDER BY importance DESC, score DESC
+        LIMIT $limit
+    );
+};
+
+-- Capa 2: detalle completo por ID (se llama solo para las memorias elegidas)
+REMOVE FUNCTION IF EXISTS fn::get_memory_detail;
+DEFINE FUNCTION fn::get_memory_detail($memory_id: record<memory>) {
+    RETURN (SELECT id, content, type, domain, importance, source, created_at, updated_at
+            FROM $memory_id)[0];
+};
+
+-- ── P3: Consolidación de memorias ────────────────────────────────────────────
+-- Devuelve clusters de memorias con alta similitud mutua para que el LLM
+-- decida cuáles sintetizar, fusionar o eliminar.
+REMOVE FUNCTION IF EXISTS fn::consolidate_memories;
+DEFINE FUNCTION fn::consolidate_memories(
+    $domain: string,
+    $threshold: float,
+    $limit: int
+) {
+    -- Tomamos las memorias con menor importancia primero (candidatas a consolidar)
+    LET $candidates = (
+        SELECT id, content, embedding, type, domain, importance
+        FROM memory
+        WHERE $domain = "all" OR domain = $domain
+        ORDER BY importance ASC, created_at ASC
+        LIMIT $limit
+    );
+    -- Para cada candidata buscamos memorias similares
+    LET $clusters = (
+        SELECT
+            id AS anchor_id,
+            content AS anchor_content,
+            type,
+            domain,
+            importance,
+            (SELECT id, content, importance,
+                vector::similarity::cosine(embedding, $parent.embedding) AS sim
+             FROM memory
+             WHERE id != $parent.id
+               AND vector::similarity::cosine(embedding, $parent.embedding) >= $threshold
+             ORDER BY sim DESC
+             LIMIT 5) AS similar
+        FROM $candidates
+        WHERE array::len(
+            (SELECT id FROM memory
+             WHERE id != $parent.id
+               AND vector::similarity::cosine(embedding, $parent.embedding) >= $threshold
+             LIMIT 1)
+        ) > 0
+    );
+    RETURN $clusters;
 };

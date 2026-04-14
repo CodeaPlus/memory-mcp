@@ -10,7 +10,10 @@ import { join } from "node:path";
 
 import { storeMemory, storeMemorySchema,
          retrieveMemories, retrieveMemoriesSchema,
-         updateMemory, updateMemorySchema } from "./tools/memory.js";
+         updateMemory, updateMemorySchema,
+         searchMemoriesIndex, searchMemoriesIndexSchema,
+         getMemoryDetail, getMemoryDetailSchema,
+         consolidateMemories, consolidateMemoriesSchema } from "./tools/memory.js";
 import { createSession, createSessionSchema,
          endSession, endSessionSchema,
          getSessionContext, getSessionContextSchema,
@@ -67,9 +70,12 @@ function createMCPServer(): McpServer {
   const server = new McpServer({ name: "memory-mcp", version: "1.0.0" });
 
   // ── Memory ────────────────────────────────────────────────────────────────
-  server.registerTool("store_memory",        { description: "Almacena una memoria persistente con embedding semántico",  inputSchema: storeMemorySchema.shape        }, toolHandler("store_memory",        (i) => storeMemory(i as any)));
-  server.registerTool("retrieve_memories",   { description: "Recupera memorias relevantes por similitud semántica",      inputSchema: retrieveMemoriesSchema.shape   }, toolHandler("retrieve_memories",   (i) => retrieveMemories(i as any)));
-  server.registerTool("update_memory",       { description: "Actualiza contenido, tipo, dominio, importancia o fuente de una memoria existente", inputSchema: updateMemorySchema.shape }, toolHandler("update_memory", (i) => updateMemory(i as any)));
+  server.registerTool("store_memory",           { description: "Almacena una memoria persistente con embedding semántico",                                       inputSchema: storeMemorySchema.shape           }, toolHandler("store_memory",           (i) => storeMemory(i as any)));
+  server.registerTool("retrieve_memories",      { description: "Recupera memorias relevantes por similitud semántica (contenido completo)",                    inputSchema: retrieveMemoriesSchema.shape      }, toolHandler("retrieve_memories",      (i) => retrieveMemories(i as any)));
+  server.registerTool("update_memory",          { description: "Actualiza contenido, tipo, dominio, importancia o fuente de una memoria existente",            inputSchema: updateMemorySchema.shape          }, toolHandler("update_memory",          (i) => updateMemory(i as any)));
+  server.registerTool("search_memories_index",  { description: "Búsqueda rápida de memorias: devuelve ID + snippet + score. Úsala antes de get_memory_detail", inputSchema: searchMemoriesIndexSchema.shape   }, toolHandler("search_memories_index",  (i) => searchMemoriesIndex(i as any)));
+  server.registerTool("get_memory_detail",      { description: "Obtiene el contenido completo de una memoria por ID (capa 2 de búsqueda)",                     inputSchema: getMemoryDetailSchema.shape       }, toolHandler("get_memory_detail",      (i) => getMemoryDetail(i as any)));
+  server.registerTool("consolidate_memories",   { description: "Encuentra clusters de memorias similares para que el LLM las sintetice o fusione",             inputSchema: consolidateMemoriesSchema.shape   }, toolHandler("consolidate_memories",   (i) => consolidateMemories(i as any)));
 
   // ── Session ───────────────────────────────────────────────────────────────
   server.registerTool("create_session",      { description: "Crea una nueva sesión de conversación",                     inputSchema: createSessionSchema.shape      }, toolHandler("create_session",      (i) => createSession(i as any)));
@@ -152,6 +158,9 @@ function formatContextForInjection(ctx: any, sessionId: string): string {
     if (last?.summary) {
       const snippet = last.summary.length > 300 ? last.summary.slice(0, 300) + "..." : last.summary;
       lines.push(`Última sesión: ${snippet}`);
+      if (last.completed?.length)   lines.push(`  ✓ Completado: ${last.completed.join("; ")}`);
+      if (last.learned?.length)     lines.push(`  → Aprendido: ${last.learned.join("; ")}`);
+      if (last.next_steps?.length)  lines.push(`  ⏭ Pendiente: ${last.next_steps.join("; ")}`);
       lines.push("");
     }
   }

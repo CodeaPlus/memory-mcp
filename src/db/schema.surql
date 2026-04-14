@@ -2,10 +2,14 @@
 -- SESIONES Y MENSAJES
 -- =====================
 DEFINE TABLE session SCHEMAFUL;
-DEFINE FIELD created_at ON session TYPE datetime DEFAULT time::now();
-DEFINE FIELD summary    ON session TYPE string;
-DEFINE FIELD topics     ON session TYPE array<string>;
-DEFINE FIELD domain     ON session TYPE string; -- 'research' | 'business' | 'mixed'
+DEFINE FIELD created_at    ON session TYPE datetime DEFAULT time::now();
+DEFINE FIELD summary       ON session TYPE string;
+DEFINE FIELD topics        ON session TYPE array<string>;
+DEFINE FIELD domain        ON session TYPE string; -- 'research' | 'business' | 'mixed'
+DEFINE FIELD investigated  ON session TYPE option<array<string>>;
+DEFINE FIELD learned       ON session TYPE option<array<string>>;
+DEFINE FIELD completed     ON session TYPE option<array<string>>;
+DEFINE FIELD next_steps    ON session TYPE option<array<string>>;
 
 DEFINE TABLE message SCHEMAFUL;
 DEFINE FIELD session_id ON message TYPE record<session>;
@@ -67,7 +71,9 @@ DEFINE INDEX idx_concept_vector ON concept FIELDS embedding;
 -- Edge: relación entre conceptos
 DEFINE TABLE relates_to SCHEMALESS TYPE RELATION
     FROM concept TO concept;
-DEFINE FIELD strength ON relates_to TYPE float DEFAULT 1.0;
+DEFINE FIELD strength    ON relates_to TYPE float DEFAULT 1.0;
+DEFINE FIELD confidence  ON relates_to TYPE string DEFAULT 'explicit';
+    -- 'explicit' | 'inferred' | 'ambiguous'
 DEFINE FIELD description ON relates_to TYPE option<string>;
 
 -- Edge: teoría derivada de sesión
