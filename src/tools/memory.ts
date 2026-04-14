@@ -55,6 +55,63 @@ export async function retrieveMemories(input: z.infer<typeof retrieveMemoriesSch
   return result ?? [];
 }
 
+// ─── P4: Búsqueda en 3 capas ─────────────────────────────────────────────────
+
+export const searchMemoriesIndexSchema = z.object({
+  query:          z.string().describe("Texto para buscar memorias (devuelve solo ID + snippet)"),
+  domain:         z.enum(["research", "business", "personal", "all"]).default("all"),
+  limit:          z.number().default(10),
+  min_similarity: z.number().default(0.65),
+});
+
+export const getMemoryDetailSchema = z.object({
+  memory_id: z.string().describe("ID de la memoria (ej: memory:abc123)"),
+});
+
+export async function searchMemoriesIndex(input: z.infer<typeof searchMemoriesIndexSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown[]]>(
+    `RETURN fn::search_memories_index($query, $domain, $limit, $threshold)`,
+    {
+      query:     input.query,
+      domain:    input.domain,
+      limit:     input.limit,
+      threshold: input.min_similarity,
+    }
+  );
+  return result ?? [];
+}
+
+export async function getMemoryDetail(input: z.infer<typeof getMemoryDetailSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown]>(
+    `RETURN fn::get_memory_detail(type::record($memory_id))`,
+    { memory_id: input.memory_id }
+  );
+  return result;
+}
+
+// ─── P3: Consolidación de memorias ───────────────────────────────────────────
+
+export const consolidateMemoriesSchema = z.object({
+  domain:         z.enum(["research", "business", "personal", "all"]).default("all"),
+  min_similarity: z.number().default(0.85).describe("Umbral de similitud para considerar memorias duplicadas/solapadas"),
+  limit:          z.number().default(20).describe("Máx. memorias a analizar en el cluster"),
+});
+
+export async function consolidateMemories(input: z.infer<typeof consolidateMemoriesSchema>) {
+  const db = await getDB();
+  const [result] = await db.query<[unknown[]]>(
+    `RETURN fn::consolidate_memories($domain, $threshold, $limit)`,
+    {
+      domain:    input.domain,
+      threshold: input.min_similarity,
+      limit:     input.limit,
+    }
+  );
+  return result ?? [];
+}
+
 export async function updateMemory(input: z.infer<typeof updateMemorySchema>) {
   const db = await getDB();
   const data: Record<string, unknown> = {};
