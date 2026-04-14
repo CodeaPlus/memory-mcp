@@ -359,7 +359,7 @@ DEFINE FUNCTION fn::consolidate_memories(
 ) {
     -- Tomamos las memorias con menor importancia primero (candidatas a consolidar)
     LET $candidates = (
-        SELECT id, content, embedding, type, domain, importance
+        SELECT id, content, embedding, type, domain, importance, created_at
         FROM memory
         WHERE $domain = "all" OR domain = $domain
         ORDER BY importance ASC, created_at ASC
