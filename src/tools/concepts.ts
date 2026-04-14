@@ -14,6 +14,8 @@ export const relateConceptsSchema = z.object({
   from_id:     z.string().describe("ID del concepto origen (ej: concept:abc123)"),
   to_id:       z.string().describe("ID del concepto destino"),
   strength:    z.number().min(0).max(1).default(1.0).describe("Fuerza de la relación 0-1"),
+  confidence:  z.enum(["explicit", "inferred", "ambiguous"]).default("explicit")
+                .describe("explicit = dicho directamente; inferred = deducido por contexto; ambiguous = dudoso"),
   description: z.string().optional().describe("Descripción de la relación"),
 });
 
@@ -45,6 +47,7 @@ export async function relateConcepts(input: z.infer<typeof relateConceptsSchema>
       type::record($from_id),
       type::record($to_id),
       $strength,
+      $confidence,
       $description
     )`,
     input

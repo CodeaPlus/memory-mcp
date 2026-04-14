@@ -9,13 +9,17 @@ export const createSessionSchema = z.object({
 });
 
 export const endSessionSchema = z.object({
-  session_id: z.string(),
-  summary: z.string(),
-  topics: z.array(z.string()),
+  session_id:         z.string(),
+  summary:            z.string(),
+  topics:             z.array(z.string()),
+  investigated:       z.array(z.string()).optional().describe("Temas investigados o explorados en esta sesión"),
+  learned:            z.array(z.string()).optional().describe("Aprendizajes o descubrimientos concretos"),
+  completed:          z.array(z.string()).optional().describe("Tareas o decisiones completadas"),
+  next_steps:         z.array(z.string()).optional().describe("Próximos pasos o pendientes sugeridos"),
   extracted_memories: z.array(z.object({
-    content: z.string(),
-    type: z.enum(["preference", "fact", "progress", "insight", "theory_seed"]),
-    domain: z.enum(["research", "business", "personal"]),
+    content:    z.string(),
+    type:       z.enum(["preference", "fact", "progress", "insight", "theory_seed"]),
+    domain:     z.enum(["research", "business", "personal"]),
     importance: z.number().min(1).max(5),
   })),
 });
@@ -44,11 +48,16 @@ export async function endSession(
   const db = await getDB();
 
   // v3: update() requiere RecordId, no string
-  await db.update(new StringRecordId(input.session_id))
-    .merge({
-      summary: input.summary,
-      topics: input.topics,
-    });
+  const sessionPatch: Record<string, unknown> = {
+    summary: input.summary,
+    topics:  input.topics,
+  };
+  if (input.investigated) sessionPatch.investigated = input.investigated;
+  if (input.learned)      sessionPatch.learned      = input.learned;
+  if (input.completed)    sessionPatch.completed    = input.completed;
+  if (input.next_steps)   sessionPatch.next_steps   = input.next_steps;
+
+  await db.update(new StringRecordId(input.session_id)).merge(sessionPatch);
 
   await Promise.all(
     input.extracted_memories.map(m => storeMemory(m))
