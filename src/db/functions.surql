@@ -3,11 +3,14 @@
 -- Ejecutar contra SurrealDB para definir/actualizar funciones.
 -- ============================================================
 
--- ── Base: embedding vía fastembed ───────────────────────────
+-- ── Base: embedding vía gemini-embed ────────────────────────
+-- Wrapper HTTP compatible con la API de fastembed.
+-- Internamente llama a Gemini Embedding 2 (batchEmbedContents).
+-- Dimensiones configuradas en el servicio (default: 1536).
 REMOVE FUNCTION IF EXISTS fn::embed;
 DEFINE FUNCTION fn::embed($text: string) {
     LET $response = http::post(
-        "http://fastembed:8000/embeddings",
+        "http://gemini-embed:8000/embeddings",
         { texts: [$text] }
     );
     RETURN $response.embeddings[0];
