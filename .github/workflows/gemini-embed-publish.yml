@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "docker/gemini-embed/**"
+  workflow_dispatch:
 
 jobs:
   build-and-push:

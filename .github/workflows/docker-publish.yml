@@ -9,6 +9,7 @@ on:
       - "docker/production/**"
       - "package*.json"
       - "tsconfig.json"
+  workflow_dispatch:
 
 jobs:
   build-and-push:
