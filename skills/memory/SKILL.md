@@ -115,20 +115,18 @@ Pregunta al usuario: "¿Cuál es la URL base de tu servidor memory-mcp? (ejemplo
 
 Usa esa URL como valor de `MEMORY_URL` en los archivos que se crean a continuación.
 
-### Paso 2 — crear los archivos de hooks
+### Paso 2 — crear el archivo del hook
 
-**`~/.claude/hooks/memory/hook-session-start.mjs`**
+Solo se necesita un archivo: **`~/.claude/hooks/memory/hook-prompt-submit.mjs`**
 
 ```js
 #!/usr/bin/env node
-// Hook SessionStart — infraestructura pura, sin llamadas al LLM:
-// 1. Lee el temp file de la sesión anterior (si existe) → guarda pending.json
-// 2. Crea nueva sesión en el MCP (REST POST /session/create)
-// 3. Guarda el nuevo session_id en el temp file
-//
-// El temp file persiste entre sesiones porque SessionEnd es no-op.
-// Cualquier instancia de Claude en esta máquina comparte el mismo tmpdir.
-import { readFileSync, writeFileSync } from "node:fs";
+// Hook UserPromptSubmit — gestiona el ciclo completo de sesiones:
+// 1. Si no hay sesión o el transcript cambió → crea sesión nueva via REST
+//    (si había sesión anterior con transcript → la guarda como pending)
+// 2. Inyecta [TAREA-AUTOMATICA] si hay sesión anterior pendiente de síntesis
+// 3. Inyecta [SESION-ACTIVA] con el session_id activo
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -140,91 +138,60 @@ const TIMEOUT_MS  = 4000;
 let raw = "";
 for await (const chunk of process.stdin) { raw += chunk; }
 
-// ── 1. Leer sesión anterior y guardar como pending ────────────────────────────
-try {
-  const prev = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
-  if (prev.session_id && prev.transcript_path) {
-    writeFileSync(PENDING_TMP, JSON.stringify({
-      session_id:      prev.session_id,
-      transcript_path: prev.transcript_path,
-      ended_at:        new Date().toISOString(),
-    }));
-  }
-} catch {}
-
-// ── 2. Crear nueva sesión en el MCP (con debounce: evitar duplicados) ────────
-// Si ya hay una sesión creada hace menos de 3 minutos, reutilizarla.
-const DEBOUNCE_MS = 3 * 60 * 1000;
-try {
-  const existing = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
-  if (existing.session_id && existing.started_at) {
-    const age = Date.now() - new Date(existing.started_at).getTime();
-    if (age < DEBOUNCE_MS) {
-      process.exit(0); // sesión reciente válida, no crear otra
-    }
-  }
-} catch {}
-
-try {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  const res = await fetch(`${MEMORY_URL}/session/create`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ domain: "mixed" }),
-    signal: controller.signal,
-  });
-  clearTimeout(timer);
-  if (res.ok) {
-    const data = await res.json();
-    if (data.session_id) {
-      // ── 3. Guardar nueva sesión (sin transcript_path aún, llega en UserPromptSubmit) ─
-      writeFileSync(SESSION_TMP, JSON.stringify({
-        session_id:  data.session_id,
-        started_at:  new Date().toISOString(),
-      }));
-    }
-  }
-} catch {}
-
-process.exit(0);
-```
-
-**`~/.claude/hooks/memory/hook-prompt-submit.mjs`**
-
-```js
-#!/usr/bin/env node
-// Hook UserPromptSubmit — inyecta dos bloques opcionales al prompt:
-// 1. [TAREA-AUTOMATICA]: si hay pending.json, instruye a Claude a cerrar
-//    la sesión anterior con end_session MCP (silenciosamente).
-// 2. [SESION-ACTIVA]: session_id activo para que Claude decida si buscar
-//    contexto con get_session_context según relevancia del mensaje.
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-const SESSION_TMP = join(tmpdir(), "memory-mcp-session.json");
-const PENDING_TMP = join(tmpdir(), "memory-mcp-pending.json");
-
-let raw = "";
-for await (const chunk of process.stdin) { raw += chunk; }
-
 let input = {};
 try { input = JSON.parse(raw); } catch { process.exit(0); }
 
 const currentTranscript = input.transcript_path ?? null;
 
-// ── 1. Leer session_id activo y actualizar transcript_path ───────────────────
-let sessionId = null;
-try {
-  const stored = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
-  sessionId = stored.session_id ?? null;
-  if (sessionId && currentTranscript) {
-    writeFileSync(SESSION_TMP, JSON.stringify({ ...stored, transcript_path: currentTranscript }));
-  }
-} catch {}
+// ── 1. Leer sesión existente ──────────────────────────────────────────────────
+let stored = null;
+try { stored = JSON.parse(readFileSync(SESSION_TMP, "utf-8")); } catch {}
 
-// ── 2. Síntesis pendiente de sesión anterior ──────────────────────────────────
+const sameConversation = stored?.transcript_path && stored.transcript_path === currentTranscript;
+let sessionId = stored?.session_id ?? null;
+
+// ── 2. Nueva conversación o sin sesión → crear sesión nueva ──────────────────
+if (!sameConversation) {
+  // Si había sesión anterior con transcript → guardar como pending para síntesis
+  if (stored?.session_id && stored?.transcript_path) {
+    writeFileSync(PENDING_TMP, JSON.stringify({
+      session_id:      stored.session_id,
+      transcript_path: stored.transcript_path,
+      ended_at:        new Date().toISOString(),
+    }));
+  }
+
+  // Crear nueva sesión via REST
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const res = await fetch(`${MEMORY_URL}/session/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domain: "mixed" }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.session_id) {
+        sessionId = data.session_id;
+        writeFileSync(SESSION_TMP, JSON.stringify({
+          session_id:      sessionId,
+          transcript_path: currentTranscript,
+          started_at:      new Date().toISOString(),
+        }));
+      }
+    }
+  } catch {}
+} else {
+  // Misma conversación → actualizar timestamp de último acceso
+  if (sessionId && currentTranscript) {
+    writeFileSync(SESSION_TMP, JSON.stringify({ ...stored, last_seen: new Date().toISOString() }));
+  }
+}
+
+// ── 3. Síntesis pendiente de sesión anterior ──────────────────────────────────
 let synthBlock = "";
 try {
   const pending = JSON.parse(readFileSync(PENDING_TMP, "utf-8"));
@@ -252,7 +219,7 @@ Solo memorias que valga recuperar en futuras sesiones.
   try { unlinkSync(PENDING_TMP); } catch {}
 } catch {}
 
-// ── 3. Contexto de sesión activa (Claude decide si buscar o no) ───────────────
+// ── 4. Contexto de sesión activa ──────────────────────────────────────────────
 let sessionBlock = "";
 if (sessionId) {
   sessionBlock = `\
@@ -276,19 +243,9 @@ if (output) process.stdout.write(output);
 process.exit(0);
 ```
 
-### Paso 3 — registrar los hooks en `~/.claude/settings.json`
+### Paso 3 — registrar el hook en `~/.claude/settings.json`
 
 ```json
-"SessionStart": [
-  {
-    "hooks": [
-      {
-        "type": "command",
-        "command": "node \"<HOME>/.claude/hooks/memory/hook-session-start.mjs\""
-      }
-    ]
-  }
-],
 "UserPromptSubmit": [
   {
     "hooks": [
