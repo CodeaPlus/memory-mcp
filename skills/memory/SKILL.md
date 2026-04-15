@@ -28,19 +28,20 @@ las llamadas de este skill.
 
 Tan pronto el usuario envíe su primer mensaje:
 
-1. Llama a `get_session_context` pasando el tema o pregunta inicial como `query`.
-   Devuelve:
-   - `memories`: recuerdos relevantes (preferencias, hechos, progreso, insights)
-   - `goals`: metas activas con su progreso actual
-   - `theories`: ideas en desarrollo
-   - `last_session`: resumen de la última conversación, incluyendo `completed`, `learned` y `next_steps` si fueron registrados
+1. **Detecta si el hook ya cargó el contexto.** Busca en el prompt un bloque
+   `--- MEMORIA ACTIVA ---` con una línea `Sesión: <id>`. Si existe:
+   - Extrae el `session_id` de esa línea y guárdalo — no llames a `create_session`.
+   - El contexto (memorias, metas, teorías, última sesión) ya está inyectado;
+     úsalo silenciosamente sin repetirlo.
 
-2. Usa ese contexto silenciosamente para enriquecer tu respuesta. No lo repitas en voz
-   alta a menos que sea directamente relevante; el usuario ya lo sabe.
-
-3. Llama a `create_session` con un `summary` provisional y `topics` basados en el
-   mensaje inicial. Guarda el `session_id` retornado — lo necesitarás al cerrar y al
-   guardar memorias.
+2. **Si el bloque NO está presente** (hook desactivado o servidor caído):
+   - Llama a `get_session_context` con el tema inicial como `query`. Devuelve:
+     - `memories`: recuerdos relevantes
+     - `goals`: metas activas con su progreso
+     - `theories`: ideas en desarrollo
+     - `last_session`: resumen de la última sesión, con `completed`, `learned` y
+       `next_steps` si fueron registrados
+   - Llama a `create_session` para obtener un `session_id` y guárdalo.
 
 ## Durante la conversación
 
