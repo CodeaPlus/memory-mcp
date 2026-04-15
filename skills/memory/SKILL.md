@@ -139,7 +139,7 @@ Cuando la conversación llega a un punto de cierre natural (el usuario se despid
 Cuando el usuario diga `/memory install`, `instalar memoria`, `configurar hooks` o similar,
 ejecuta los siguientes pasos **sin pedir confirmación** usando tus herramientas directamente.
 
-### Paso 1 — Detectar rutas
+### Paso 1 — Detectar rutas y URL del servidor
 
 Determina el directorio home del usuario:
 - **Windows**: `C:\Users\<usuario>` — obtenerlo con Bash: `echo %USERPROFILE%`
@@ -149,14 +149,24 @@ Las rutas destino son:
 - Hooks: `<HOME>/.claude/hooks/memory/`
 - Settings: `<HOME>/.claude/settings.json`
 
+**Pregunta al usuario la URL pública del servidor memory-mcp** antes de continuar:
+
+> ¿Cuál es la URL donde está corriendo el servidor memory-mcp?
+> (ej: `https://memory.tudominio.com`, `http://192.168.1.10:3000`, o `http://localhost:3000` si es local)
+
+Guarda esa URL como `<MEMORY_URL>` — la usarás en el Paso 2 para escribirla directamente en los hooks.
+
 ### Paso 2 — Escribir los hooks
 
 Crea el directorio `<HOME>/.claude/hooks/memory/` si no existe y escribe estos dos archivos:
 
 **Archivo: `hook-prompt-submit.mjs`**
+
+Sustituye `<MEMORY_URL>` con la URL obtenida en el Paso 1.
+
 ```javascript
 #!/usr/bin/env node
-const MEMORY_URL = process.env.MEMORY_MCP_URL ?? "http://localhost:3000";
+const MEMORY_URL = process.env.MEMORY_MCP_URL ?? "<MEMORY_URL>";
 const TIMEOUT_MS = 3000;
 
 let raw = "";
@@ -187,11 +197,14 @@ process.exit(0);
 ```
 
 **Archivo: `hook-stop.mjs`**
+
+Sustituye `<MEMORY_URL>` con la URL obtenida en el Paso 1.
+
 ```javascript
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 
-const MEMORY_URL = process.env.MEMORY_MCP_URL ?? "http://localhost:3000";
+const MEMORY_URL = process.env.MEMORY_MCP_URL ?? "<MEMORY_URL>";
 const TIMEOUT_MS = 3000;
 
 let raw = "";
@@ -263,5 +276,6 @@ Reemplaza `<HOME>` con la ruta absoluta detectada en el Paso 1. En Windows usa b
 
 Responde al usuario con un resumen de lo que se instaló:
 - Paths de los archivos creados
+- La URL del servidor que quedó configurada en los hooks
 - Que debe **reiniciar Claude Code** para que los hooks surtan efecto
-- Que si el servidor memory-mcp no está corriendo, los hooks fallan silenciosamente sin interrumpir nada
+- Que `MEMORY_MCP_URL` como variable de entorno del sistema tiene precedencia sobre la URL escrita en los hooks (útil si cambia el servidor sin reinstalar)
