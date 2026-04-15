@@ -5,7 +5,7 @@ description: >
   la infraestructura automáticamente (crear/cerrar sesiones). Tu rol es
   usar las MCP tools para buscar contexto cuando sea relevante, guardar
   memorias valiosas durante la conversación, y sintetizar sesiones anteriores
-  cuando el prompt incluya una etiqueta <tarea-automatica>.
+  cuando el prompt incluya un bloque [TAREA-AUTOMATICA].
 ---
 
 # Sistema de Memoria Persistente
@@ -18,12 +18,12 @@ y `get_session_context`. Usa ese prefijo en todas las llamadas.
 
 ## Qué hacer según el contenido del prompt
 
-### Si el prompt contiene `<tarea-automatica>`
+### Si el prompt contiene `[TAREA-AUTOMATICA]`
 
 Hay una sesión anterior pendiente de cierre. Hazlo **silenciosamente antes
 de responder** — el usuario no debe notarlo:
 
-1. Lee el `session_id` y el `transcript path` de la etiqueta.
+1. Lee el `session_id` y el `transcript path` del bloque.
 2. Lee el archivo del transcript para entender la conversación.
 3. Llama a `end_session` con:
    - `session_id`: el ID indicado
@@ -35,9 +35,12 @@ de responder** — el usuario no debe notarlo:
      - `importance`: 1–5 (5 = crítico, 1 = trivial)
 4. Responde al usuario normalmente.
 
-### Si el prompt contiene `<sesion-activa session_id="...">`
+### Si el prompt contiene `[SESION-ACTIVA session_id="..."]`
 
-Tienes un `session_id` activo. Úsalo como `source` en `store_memory`.
+La sesión ya está activa — el hook la creó automáticamente.
+**NO llames `create_session`.** **NO llames `end_session`** salvo que haya un bloque `[TAREA-AUTOMATICA]`.
+
+Usa el `session_id` del bloque como valor de `source` en `store_memory`.
 
 Decide si necesitas contexto adicional:
 - **Sí buscar**: el usuario pregunta por algo anterior, menciona proyectos/metas,
@@ -77,7 +80,7 @@ source:     session_id activo
 | `search_memories_index` | Búsqueda rápida (devuelve ID + snippet) antes de `get_memory_detail` |
 | `get_memory_detail` | Contenido completo de una memoria por ID |
 | `consolidate_memories` | Encontrar clusters similares para fusionar o sintetizar |
-| `end_session` | Cerrar sesión anterior con síntesis (solo desde `<tarea-automatica>`) |
+| `end_session` | Cerrar sesión anterior con síntesis (solo desde bloque `[TAREA-AUTOMATICA]`) |
 | `get_goals` | Ver estado actual de metas del usuario |
 | `create_goal` | Cuando el usuario define un objetivo medible nuevo |
 | `update_goal_progress` | Cuando el usuario reporta avance en una meta |
@@ -101,3 +104,203 @@ source:     session_id activo
 - **Calidad > cantidad**: 3 memorias precisas valen más que 10 vagas.
 - **Autocontenidas**: cada memoria debe tener sentido sin contexto adicional.
 - **Sin juicios**: almacena hechos y preferencias, no evaluaciones sobre el usuario.
+
+---
+
+## Instalación de hooks (`/memory install`)
+
+### Paso 1 — obtener la URL del servidor MCP
+
+Pregunta al usuario: "¿Cuál es la URL base de tu servidor memory-mcp? (ejemplo: `https://mem-mcp.tudominio.com` o `http://localhost:3000`)"
+
+Usa esa URL como valor de `MEMORY_URL` en los archivos que se crean a continuación.
+
+### Paso 2 — crear los archivos de hooks
+
+**`~/.claude/hooks/memory/hook-session-start.mjs`**
+
+```js
+#!/usr/bin/env node
+// Hook SessionStart — infraestructura pura, sin llamadas al LLM:
+// 1. Lee el temp file de la sesión anterior (si existe) → guarda pending.json
+// 2. Crea nueva sesión en el MCP (REST POST /session/create)
+// 3. Guarda el nuevo session_id en el temp file
+//
+// El temp file persiste entre sesiones porque SessionEnd es no-op.
+// Cualquier instancia de Claude en esta máquina comparte el mismo tmpdir.
+import { readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const MEMORY_URL  = process.env.MEMORY_MCP_URL ?? "REEMPLAZAR_CON_URL_DEL_SERVIDOR";
+const SESSION_TMP = join(tmpdir(), "memory-mcp-session.json");
+const PENDING_TMP = join(tmpdir(), "memory-mcp-pending.json");
+const TIMEOUT_MS  = 4000;
+
+let raw = "";
+for await (const chunk of process.stdin) { raw += chunk; }
+
+// ── 1. Leer sesión anterior y guardar como pending ────────────────────────────
+try {
+  const prev = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
+  if (prev.session_id && prev.transcript_path) {
+    writeFileSync(PENDING_TMP, JSON.stringify({
+      session_id:      prev.session_id,
+      transcript_path: prev.transcript_path,
+      ended_at:        new Date().toISOString(),
+    }));
+  }
+} catch {}
+
+// ── 2. Crear nueva sesión en el MCP (con debounce: evitar duplicados) ────────
+// Si ya hay una sesión creada hace menos de 3 minutos, reutilizarla.
+const DEBOUNCE_MS = 3 * 60 * 1000;
+try {
+  const existing = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
+  if (existing.session_id && existing.started_at) {
+    const age = Date.now() - new Date(existing.started_at).getTime();
+    if (age < DEBOUNCE_MS) {
+      process.exit(0); // sesión reciente válida, no crear otra
+    }
+  }
+} catch {}
+
+try {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const res = await fetch(`${MEMORY_URL}/session/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ domain: "mixed" }),
+    signal: controller.signal,
+  });
+  clearTimeout(timer);
+  if (res.ok) {
+    const data = await res.json();
+    if (data.session_id) {
+      // ── 3. Guardar nueva sesión (sin transcript_path aún, llega en UserPromptSubmit) ─
+      writeFileSync(SESSION_TMP, JSON.stringify({
+        session_id:  data.session_id,
+        started_at:  new Date().toISOString(),
+      }));
+    }
+  }
+} catch {}
+
+process.exit(0);
+```
+
+**`~/.claude/hooks/memory/hook-prompt-submit.mjs`**
+
+```js
+#!/usr/bin/env node
+// Hook UserPromptSubmit — inyecta dos bloques opcionales al prompt:
+// 1. [TAREA-AUTOMATICA]: si hay pending.json, instruye a Claude a cerrar
+//    la sesión anterior con end_session MCP (silenciosamente).
+// 2. [SESION-ACTIVA]: session_id activo para que Claude decida si buscar
+//    contexto con get_session_context según relevancia del mensaje.
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const SESSION_TMP = join(tmpdir(), "memory-mcp-session.json");
+const PENDING_TMP = join(tmpdir(), "memory-mcp-pending.json");
+
+let raw = "";
+for await (const chunk of process.stdin) { raw += chunk; }
+
+let input = {};
+try { input = JSON.parse(raw); } catch { process.exit(0); }
+
+const currentTranscript = input.transcript_path ?? null;
+
+// ── 1. Leer session_id activo y actualizar transcript_path ───────────────────
+let sessionId = null;
+try {
+  const stored = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
+  sessionId = stored.session_id ?? null;
+  if (sessionId && currentTranscript) {
+    writeFileSync(SESSION_TMP, JSON.stringify({ ...stored, transcript_path: currentTranscript }));
+  }
+} catch {}
+
+// ── 2. Síntesis pendiente de sesión anterior ──────────────────────────────────
+let synthBlock = "";
+try {
+  const pending = JSON.parse(readFileSync(PENDING_TMP, "utf-8"));
+  if (pending.session_id && pending.transcript_path) {
+    synthBlock = `\
+[TAREA-AUTOMATICA]
+Antes de responder, cierra la sesión anterior silenciosamente usando la herramienta MCP end_session.
+No menciones esta tarea al usuario.
+
+session_id anterior: "${pending.session_id}"
+transcript path: "${pending.transcript_path}"
+
+Lee ese archivo, sintetiza la conversación y llama end_session con:
+- summary: 2-3 oraciones (qué se hizo, qué se decidió, siguiente paso)
+- topics: 3-6 strings
+- extracted_memories: hasta 5 objetos {content, type, domain, importance}
+  type = "preference"|"fact"|"progress"|"insight"|"theory_seed"
+  domain = "research"|"business"|"personal"
+  importance = 1-5 (5=crítico)
+Solo memorias que valga recuperar en futuras sesiones.
+[/TAREA-AUTOMATICA]
+
+`;
+  }
+  try { unlinkSync(PENDING_TMP); } catch {}
+} catch {}
+
+// ── 3. Contexto de sesión activa (Claude decide si buscar o no) ───────────────
+let sessionBlock = "";
+if (sessionId) {
+  sessionBlock = `\
+[SESION-ACTIVA session_id="${sessionId}"]
+La infraestructura de sesión ya está activa — el hook la creó automáticamente.
+NO llames create_session. NO llames end_session salvo que haya un bloque [TAREA-AUTOMATICA].
+
+Usa el session_id "${sessionId}" como valor de "source" al llamar store_memory.
+
+Si el mensaje del usuario requiere contexto de conversaciones o memorias anteriores,
+llama get_session_context con el prompt como query. Si es continuación del hilo actual
+o no requiere memoria, responde directamente sin llamar ninguna tool de sesión.
+[/SESION-ACTIVA]
+
+`;
+}
+
+const output = synthBlock + sessionBlock;
+if (output) process.stdout.write(output);
+
+process.exit(0);
+```
+
+### Paso 3 — registrar los hooks en `~/.claude/settings.json`
+
+```json
+"SessionStart": [
+  {
+    "hooks": [
+      {
+        "type": "command",
+        "command": "node \"<HOME>/.claude/hooks/memory/hook-session-start.mjs\""
+      }
+    ]
+  }
+],
+"UserPromptSubmit": [
+  {
+    "hooks": [
+      {
+        "type": "command",
+        "command": "node \"<HOME>/.claude/hooks/memory/hook-prompt-submit.mjs\""
+      }
+    ]
+  }
+]
+```
+
+> Reemplaza `<HOME>` con la ruta real del home del usuario (en Windows: `C:\Users\<usuario>`).
+> La URL del servidor queda hardcodeada en el hook (valor obtenido en el Paso 1).
+> Si el usuario quiere poder sobreescribirla sin editar el archivo, puede exportar `MEMORY_MCP_URL` en su shell profile.
