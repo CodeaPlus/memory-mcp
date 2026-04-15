@@ -4,9 +4,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { storeMemory, storeMemorySchema,
          retrieveMemories, retrieveMemoriesSchema,
@@ -35,9 +32,6 @@ import { createConcept, createConceptSchema,
          searchConcepts, searchConceptsSchema,
          getConceptGraph, getConceptGraphSchema } from "./tools/concepts.js";
 import { getDB } from "./db.js";
-
-// ─── Temp file para session activa entre hooks ────────────────────────────────
-const SESSION_TMP = join(tmpdir(), "memory-mcp-session.json");
 
 // ─── Logger ───────────────────────────────────────────────────────────────────
 function log(level: "INFO" | "WARN" | "ERROR", ctx: string, msg: string, extra?: unknown) {
@@ -110,64 +104,6 @@ function createMCPServer(): McpServer {
 
 // ─── Helpers para endpoints REST ─────────────────────────────────────────────
 
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve) => {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk.toString()));
-    req.on("end", () => {
-      try { resolve(JSON.parse(body)); }
-      catch { resolve({}); }
-    });
-    req.on("error", () => resolve({}));
-  });
-}
-
-function formatContextForInjection(ctx: any, sessionId: string): string {
-  const date = new Date().toLocaleDateString("es", { day: "2-digit", month: "short", year: "numeric" });
-  const lines: string[] = [
-    `\n--- MEMORIA ACTIVA (${date}) ---`,
-    `Sesión: ${sessionId}\n`,
-  ];
-
-  if (ctx?.memories?.length) {
-    lines.push("Memorias relevantes:");
-    for (const m of ctx.memories) {
-      lines.push(`- [${m.type}/${m.importance}] ${m.content}`);
-    }
-    lines.push("");
-  }
-
-  if (ctx?.goals?.length) {
-    lines.push("Metas activas:");
-    for (const g of ctx.goals) {
-      lines.push(`- ${g.title} (${g.current ?? 0}/${g.target} ${g.unit ?? ""})`);
-    }
-    lines.push("");
-  }
-
-  if (ctx?.theories?.length) {
-    lines.push("Teorías en desarrollo:");
-    for (const t of ctx.theories) {
-      lines.push(`- [${t.status}] ${t.title}`);
-    }
-    lines.push("");
-  }
-
-  if (Array.isArray(ctx?.last_session) && ctx.last_session.length > 0) {
-    const last = ctx.last_session[0] as any;
-    if (last?.summary) {
-      const snippet = last.summary.length > 300 ? last.summary.slice(0, 300) + "..." : last.summary;
-      lines.push(`Última sesión: ${snippet}`);
-      if (last.completed?.length)   lines.push(`  ✓ Completado: ${last.completed.join("; ")}`);
-      if (last.learned?.length)     lines.push(`  → Aprendido: ${last.learned.join("; ")}`);
-      if (last.next_steps?.length)  lines.push(`  ⏭ Pendiente: ${last.next_steps.join("; ")}`);
-      lines.push("");
-    }
-  }
-
-  lines.push("--- FIN MEMORIA ---\n");
-  return lines.join("\n");
-}
 
 // ─── Modo HTTP ────────────────────────────────────────────────────────────────
 async function startHTTP() {
@@ -193,59 +129,17 @@ async function startHTTP() {
       return;
     }
 
-    // ── GET /context?q=<query> — carga contexto y crea sesión automáticamente ─
-    if (url.pathname === "/context" && req.method === "GET") {
-      const query = url.searchParams.get("q") ?? "contexto general";
+    // ── POST /session/create — crea sesión nueva desde SessionStart hook ─────────
+    if (url.pathname === "/session/create" && req.method === "POST") {
       try {
-        const [contextResult, sessionResult] = await Promise.all([
-          getSessionContext({ query }),
-          createSession({ domain: "mixed" }),
-        ]);
+        const sessionResult = await createSession({ domain: "mixed" });
         const sessionId = sessionResult.session_id ?? "unknown";
-        try {
-          writeFileSync(SESSION_TMP, JSON.stringify({ session_id: sessionId, started_at: new Date().toISOString() }));
-        } catch {}
-        const formatted = formatContextForInjection(contextResult, sessionId);
+        log("INFO", "POST /session/create", `Sesión creada: ${sessionId}`);
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ context: formatted, session_id: sessionId, raw: contextResult }));
+        res.end(JSON.stringify({ session_id: sessionId }));
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-        log("ERROR", "GET /context", error.message, error.stack);
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: error.message }));
-      }
-      return;
-    }
-
-    // ── POST /session/auto-end — cierra sesión activa desde hook Stop ─────────
-    if (url.pathname === "/session/auto-end" && req.method === "POST") {
-      let sessionId: string | null = null;
-      try {
-        const stored = JSON.parse(readFileSync(SESSION_TMP, "utf-8"));
-        sessionId = stored.session_id ?? null;
-      } catch {}
-
-      if (!sessionId) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "No hay sesión activa" }));
-        return;
-      }
-
-      try {
-        const body = await readBody(req);
-        const summary = typeof body.summary === "string" && body.summary.trim()
-          ? body.summary
-          : `Conversación automática (${new Date().toLocaleDateString("es")})`;
-        const topics = Array.isArray(body.topics) ? body.topics as string[] : [];
-
-        await endSession({ session_id: sessionId, summary, topics, extracted_memories: [] });
-        try { unlinkSync(SESSION_TMP); } catch {}
-        log("INFO", "POST /session/auto-end", `Sesión ${sessionId} cerrada`);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "closed", session_id: sessionId }));
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        log("ERROR", "POST /session/auto-end", error.message, error.stack);
+        log("ERROR", "POST /session/create", error.message, error.stack);
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: error.message }));
       }
