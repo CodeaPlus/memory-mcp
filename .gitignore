@@ -12,6 +12,9 @@ dist/
 .env.*
 !.env.example
 
+# Script de prueba local (reemplazado por scripts/test-connection.ts)
+test.ts
+
 # Logs
 logs/
 *.log

@@ -1,0 +1,54 @@
+# Entorno de desarrollo local
+# Incluye SurrealDB y gemini-embed para que solo necesites ejecutar memory-mcp localmente.
+#
+# Uso:
+#   GEMINI_API_KEY=tu-api-key docker compose up -d
+#
+# Luego aplica el esquema y las funciones (primera vez):
+#   npm run db:setup
+#
+# Finalmente ejecuta el servidor:
+#   npm run dev
+
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: memory-surrealdb
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    command: >
+      start
+      --log debug
+      --user root
+      --pass root
+      surrealkv://data/memory.db
+    volumes:
+      - surrealdb-data:/data
+    healthcheck:
+      test: ["CMD", "surreal", "is-ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gemini-embed:
+    build:
+      context: ../gemini-embed
+      dockerfile: Dockerfile
+    container_name: memory-gemini-embed
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-embedding-2-preview}
+      EMBED_DIMENSIONS: ${EMBED_DIMENSIONS:-1536}
+      PORT: 8000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  surrealdb-data:
