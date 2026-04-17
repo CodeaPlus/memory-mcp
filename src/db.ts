@@ -32,9 +32,7 @@ async function connectWithRetry(
   }
 }
 
-export async function getDB(): Promise<Surreal> {
-  if (db) return db;
-
+async function createConnection(): Promise<Surreal> {
   const url  = process.env.SURREAL_URL  ?? "ws://localhost:8000";
   const ns   = process.env.SURREAL_NS   ?? "personal";
   const database = process.env.SURREAL_DB ?? "memory";
@@ -50,9 +48,24 @@ export async function getDB(): Promise<Surreal> {
     },
   });
 
+  await connectWithRetry(instance, url, ns, database, user, pass);
+  return instance;
+}
+
+export async function getDB(): Promise<Surreal> {
+  // Si hay conexión existente, verificar que sigue viva
+  if (db) {
+    try {
+      await db.ping();
+      return db;
+    } catch {
+      console.error("[db] Conexión perdida, reconectando...");
+      db = null;
+    }
+  }
+
   try {
-    await connectWithRetry(instance, url, ns, database, user, pass);
-    db = instance;
+    db = await createConnection();
   } catch (err) {
     console.error("[db] ERROR: no se pudo conectar a SurrealDB tras todos los intentos:", err);
     db = null;
