@@ -15,7 +15,7 @@ Permite a agentes de IA (como Claude Code) almacenar y recuperar memorias, sesio
 ### 1. Clona e instala
 
 ```bash
-git clone https://github.com/tu-usuario/memory-mcp.git
+git clone https://github.com/CodeaPlus/memory-mcp.git
 cd memory-mcp
 npm install
 ```
