@@ -56,7 +56,7 @@ export async function getDB(): Promise<Surreal> {
   // Si hay conexión existente, verificar que sigue viva
   if (db) {
     try {
-      await db.ping();
+      await db.health();
       return db;
     } catch {
       console.error("[db] Conexión perdida, reconectando...");
