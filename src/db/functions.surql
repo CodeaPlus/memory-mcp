@@ -23,18 +23,26 @@ DEFINE FUNCTION fn::store_memory(
     $type: string,
     $domain: string,
     $importance: int,
-    $source: option<record>
+    $source: option<record>,
+    $valid_from: option<datetime>,
+    $valid_until: option<datetime>,
+    $procedure_meta: option<object>
 ) {
     LET $embedding = fn::embed($content);
     RETURN CREATE memory CONTENT {
-        content:    $content,
-        embedding:  $embedding,
-        type:       $type,
-        domain:     $domain,
-        importance: $importance,
-        source:     $source,
-        created_at: time::now(),
-        updated_at: time::now()
+        content:        $content,
+        embedding:      $embedding,
+        type:           $type,
+        domain:         $domain,
+        importance:     $importance,
+        source:         $source,
+        valid_from:     $valid_from ?? time::now(),
+        valid_until:    $valid_until,
+        procedure_meta: $procedure_meta,
+        created_at:     time::now(),
+        updated_at:     time::now(),
+        last_accessed:  time::now(),
+        access_count:   0
     };
 };
 
@@ -57,16 +65,26 @@ DEFINE FUNCTION fn::search_memories(
     $query: string,
     $domain: string,
     $limit: int,
-    $threshold: float
+    $threshold: float,
+    $as_of: option<datetime>
 ) {
+    LET $now = $as_of ?? time::now();
     LET $embedding = fn::embed($query);
     RETURN (
         SELECT id, content, type, domain, importance, source,
-            vector::similarity::cosine(embedding, $embedding) AS score
+            valid_from, valid_until, last_accessed, access_count,
+            vector::similarity::cosine(embedding, $embedding) AS similarity,
+            (vector::similarity::cosine(embedding, $embedding)
+                * (importance / 5.0)
+                * math::pow(0.95, duration::secs($now - last_accessed) / 604800.0)
+            ) AS score
         FROM memory
         WHERE vector::similarity::cosine(embedding, $embedding) > $threshold
           AND ($domain = "all" OR domain = $domain)
-        ORDER BY importance DESC, score DESC
+          AND valid_from <= $now
+          AND (valid_until IS NONE OR valid_until > $now)
+          AND superseded_by IS NONE
+        ORDER BY score DESC
         LIMIT $limit
     );
 };
@@ -123,14 +141,35 @@ DEFINE FUNCTION fn::link_theory_session(
 -- ── Session ─────────────────────────────────────────────────
 REMOVE FUNCTION IF EXISTS fn::get_session_context;
 DEFINE FUNCTION fn::get_session_context($query: string) {
+    LET $now = time::now();
     LET $embedding = fn::embed($query);
     LET $memories = (
         SELECT content, type, domain, importance,
-            vector::similarity::cosine(embedding, $embedding) AS score
+            vector::similarity::cosine(embedding, $embedding) AS similarity,
+            (vector::similarity::cosine(embedding, $embedding)
+                * (importance / 5.0)
+                * math::pow(0.95, duration::secs($now - last_accessed) / 604800.0)
+            ) AS score
         FROM memory
         WHERE vector::similarity::cosine(embedding, $embedding) > 0.70
-        ORDER BY importance DESC, score DESC
+          AND type != "procedure"
+          AND valid_from <= $now
+          AND (valid_until IS NONE OR valid_until > $now)
+          AND superseded_by IS NONE
+        ORDER BY score DESC
         LIMIT 5
+    );
+    LET $procedures = (
+        SELECT content, domain, importance, procedure_meta,
+            vector::similarity::cosine(embedding, $embedding) AS score
+        FROM memory
+        WHERE type = "procedure"
+          AND vector::similarity::cosine(embedding, $embedding) > 0.60
+          AND valid_from <= $now
+          AND (valid_until IS NONE OR valid_until > $now)
+          AND superseded_by IS NONE
+        ORDER BY score DESC
+        LIMIT 3
     );
     LET $goals = (
         SELECT title, type, target, current, unit, status
@@ -153,6 +192,7 @@ DEFINE FUNCTION fn::get_session_context($query: string) {
     );
     RETURN {
         memories:     $memories,
+        procedures:   $procedures,
         goals:        $goals,
         theories:     $theories,
         last_session: $last_session
@@ -325,18 +365,28 @@ DEFINE FUNCTION fn::search_memories_index(
     $query: string,
     $domain: string,
     $limit: int,
-    $threshold: float
+    $threshold: float,
+    $as_of: option<datetime>
 ) {
+    LET $now = $as_of ?? time::now();
     LET $embedding = fn::embed($query);
     RETURN (
         SELECT id,
             string::slice(content, 0, 120) AS snippet,
             type, domain, importance,
-            vector::similarity::cosine(embedding, $embedding) AS score
+            valid_from, valid_until,
+            vector::similarity::cosine(embedding, $embedding) AS similarity,
+            (vector::similarity::cosine(embedding, $embedding)
+                * (importance / 5.0)
+                * math::pow(0.95, duration::secs($now - last_accessed) / 604800.0)
+            ) AS score
         FROM memory
         WHERE vector::similarity::cosine(embedding, $embedding) > $threshold
           AND ($domain = "all" OR domain = $domain)
-        ORDER BY importance DESC, score DESC
+          AND valid_from <= $now
+          AND (valid_until IS NONE OR valid_until > $now)
+          AND superseded_by IS NONE
+        ORDER BY score DESC
         LIMIT $limit
     );
 };
@@ -344,8 +394,72 @@ DEFINE FUNCTION fn::search_memories_index(
 -- Capa 2: detalle completo por ID (se llama solo para las memorias elegidas)
 REMOVE FUNCTION IF EXISTS fn::get_memory_detail;
 DEFINE FUNCTION fn::get_memory_detail($memory_id: record<memory>) {
-    RETURN (SELECT id, content, type, domain, importance, source, created_at, updated_at
+    UPDATE $memory_id SET last_accessed = time::now(), access_count += 1;
+    RETURN (SELECT id, content, type, domain, importance, source,
+                   valid_from, valid_until, superseded_by,
+                   last_accessed, access_count, procedure_meta,
+                   created_at, updated_at
             FROM $memory_id)[0];
+};
+
+-- ── Temporal: invalidar memoria ──────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::invalidate_memory;
+DEFINE FUNCTION fn::invalidate_memory(
+    $memory_id: record<memory>,
+    $superseded_by: option<record<memory>>
+) {
+    UPDATE $memory_id SET
+        valid_until    = time::now(),
+        superseded_by  = $superseded_by,
+        updated_at     = time::now();
+    RETURN (SELECT id, content, valid_until, superseded_by FROM $memory_id)[0];
+};
+
+-- ── Decay: memorias obsoletas ───────────────────────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::get_stale_memories;
+DEFINE FUNCTION fn::get_stale_memories(
+    $domain: string,
+    $days_threshold: int,
+    $limit: int
+) {
+    LET $cutoff = time::now() - duration::from::days($days_threshold);
+    RETURN (
+        SELECT id, string::slice(content, 0, 120) AS snippet,
+               type, domain, importance, last_accessed, access_count,
+               created_at
+        FROM memory
+        WHERE last_accessed < $cutoff
+          AND ($domain = "all" OR domain = $domain)
+          AND (valid_until IS NONE OR valid_until > time::now())
+          AND superseded_by IS NONE
+        ORDER BY importance ASC, last_accessed ASC
+        LIMIT $limit
+    );
+};
+
+-- ── Procedural: buscar procedimientos activos ───────────────────────────────
+REMOVE FUNCTION IF EXISTS fn::get_active_procedures;
+DEFINE FUNCTION fn::get_active_procedures(
+    $query: string,
+    $domain: string,
+    $limit: int
+) {
+    LET $now = time::now();
+    LET $embedding = fn::embed($query);
+    RETURN (
+        SELECT id, content, domain, importance, procedure_meta,
+            last_accessed, access_count,
+            vector::similarity::cosine(embedding, $embedding) AS score
+        FROM memory
+        WHERE type = "procedure"
+          AND vector::similarity::cosine(embedding, $embedding) > 0.60
+          AND ($domain = "all" OR domain = $domain)
+          AND valid_from <= $now
+          AND (valid_until IS NONE OR valid_until > $now)
+          AND superseded_by IS NONE
+        ORDER BY score DESC
+        LIMIT $limit
+    );
 };
 
 -- ── P3: Consolidación de memorias ────────────────────────────────────────────

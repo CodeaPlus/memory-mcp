@@ -18,9 +18,14 @@ export const endSessionSchema = z.object({
   next_steps:         z.array(z.string()).optional().describe("Próximos pasos o pendientes sugeridos"),
   extracted_memories: z.array(z.object({
     content:    z.string(),
-    type:       z.enum(["preference", "fact", "progress", "insight", "theory_seed"]),
+    type:       z.enum(["preference", "fact", "progress", "insight", "theory_seed", "procedure"]),
     domain:     z.enum(["research", "business", "personal"]),
     importance: z.number().min(1).max(5),
+    procedure_meta: z.object({
+      trigger:      z.string(),
+      steps:        z.array(z.string()),
+      learned_from: z.string().optional(),
+    }).optional(),
   })),
 });
 
@@ -60,7 +65,10 @@ export async function endSession(
   await db.update(new StringRecordId(input.session_id)).merge(sessionPatch);
 
   await Promise.all(
-    input.extracted_memories.map(m => storeMemory(m))
+    input.extracted_memories.map(m => storeMemory({
+      ...m,
+      source: input.session_id,
+    }))
   );
 
   return {

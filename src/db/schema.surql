@@ -30,12 +30,21 @@ DEFINE TABLE memory SCHEMAFUL;
 DEFINE FIELD content     ON memory TYPE string;
 DEFINE FIELD embedding   ON memory TYPE array<float>;
 DEFINE FIELD type        ON memory TYPE string;
-    -- 'preference' | 'fact' | 'progress' | 'insight' | 'theory_seed'
+    -- 'preference' | 'fact' | 'progress' | 'insight' | 'theory_seed' | 'procedure'
+DEFINE FIELD procedure_meta ON memory TYPE option<object>; -- solo para type='procedure'
+    -- { trigger: string, steps: [string], learned_from?: string }
 DEFINE FIELD importance  ON memory TYPE int DEFAULT 1; -- escala 1-5
 DEFINE FIELD domain      ON memory TYPE string; -- 'research' | 'business' | 'personal'
-DEFINE FIELD created_at  ON memory TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at  ON memory TYPE datetime DEFAULT time::now();
-DEFINE FIELD source      ON memory TYPE option<record>; -- session | theory | goal
+DEFINE FIELD created_at     ON memory TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at     ON memory TYPE datetime DEFAULT time::now();
+DEFINE FIELD source         ON memory TYPE option<record>; -- session | theory | goal
+-- Temporal awareness
+DEFINE FIELD valid_from     ON memory TYPE datetime DEFAULT time::now();
+DEFINE FIELD valid_until    ON memory TYPE option<datetime>; -- null = vigente indefinidamente
+DEFINE FIELD superseded_by  ON memory TYPE option<record<memory>>;
+-- Decay tracking
+DEFINE FIELD last_accessed  ON memory TYPE datetime DEFAULT time::now();
+DEFINE FIELD access_count   ON memory TYPE int DEFAULT 0;
 
 DEFINE INDEX idx_memory_vector ON memory FIELDS embedding;
 DEFINE INDEX idx_memory_domain ON memory FIELDS domain, importance;

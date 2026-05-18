@@ -10,7 +10,11 @@ import { storeMemory, storeMemorySchema,
          updateMemory, updateMemorySchema,
          searchMemoriesIndex, searchMemoriesIndexSchema,
          getMemoryDetail, getMemoryDetailSchema,
-         consolidateMemories, consolidateMemoriesSchema } from "./tools/memory.js";
+         consolidateMemories, consolidateMemoriesSchema,
+         invalidateMemory, invalidateMemorySchema,
+         getStaleMemories, getStaleMemoriesSchema,
+         storeProcedure, storeProcedureSchema,
+         getProcedures, getProceduresSchema } from "./tools/memory.js";
 import { createSession, createSessionSchema,
          endSession, endSessionSchema,
          getSessionContext, getSessionContextSchema,
@@ -70,6 +74,10 @@ function createMCPServer(): McpServer {
   server.registerTool("search_memories_index",  { description: "Búsqueda rápida de memorias: devuelve ID + snippet + score. Úsala antes de get_memory_detail", inputSchema: searchMemoriesIndexSchema.shape   }, toolHandler("search_memories_index",  (i) => searchMemoriesIndex(i as any)));
   server.registerTool("get_memory_detail",      { description: "Obtiene el contenido completo de una memoria por ID (capa 2 de búsqueda)",                     inputSchema: getMemoryDetailSchema.shape       }, toolHandler("get_memory_detail",      (i) => getMemoryDetail(i as any)));
   server.registerTool("consolidate_memories",   { description: "Encuentra clusters de memorias similares para que el LLM las sintetice o fusione",             inputSchema: consolidateMemoriesSchema.shape   }, toolHandler("consolidate_memories",   (i) => consolidateMemories(i as any)));
+  server.registerTool("invalidate_memory",     { description: "Invalida una memoria (marca valid_until=ahora) y opcionalmente la enlaza a su reemplazo",          inputSchema: invalidateMemorySchema.shape      }, toolHandler("invalidate_memory",      (i) => invalidateMemory(i as any)));
+  server.registerTool("get_stale_memories",    { description: "Encuentra memorias no accedidas en N días, candidatas a poda o consolidación",                     inputSchema: getStaleMemoriesSchema.shape      }, toolHandler("get_stale_memories",     (i) => getStaleMemories(i as any)));
+  server.registerTool("store_procedure",       { description: "Almacena un procedimiento aprendido (cómo hacer algo) con trigger, pasos y contexto",              inputSchema: storeProcedureSchema.shape        }, toolHandler("store_procedure",        (i) => storeProcedure(i as any)));
+  server.registerTool("get_procedures",        { description: "Busca procedimientos relevantes por similitud semántica",                                           inputSchema: getProceduresSchema.shape         }, toolHandler("get_procedures",         (i) => getProcedures(i as any)));
 
   // ── Session ───────────────────────────────────────────────────────────────
   server.registerTool("create_session",      { description: "Crea una nueva sesión de conversación",                     inputSchema: createSessionSchema.shape      }, toolHandler("create_session",      (i) => createSession(i as any)));
