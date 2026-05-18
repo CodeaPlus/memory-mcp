@@ -422,7 +422,7 @@ DEFINE FUNCTION fn::get_stale_memories(
     $days_threshold: int,
     $limit: int
 ) {
-    LET $cutoff = time::now() - duration::from::days($days_threshold);
+    LET $cutoff = time::now() - duration::from_days($days_threshold);
     RETURN (
         SELECT id, string::slice(content, 0, 120) AS snippet,
                type, domain, importance, last_accessed, access_count,
